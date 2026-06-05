@@ -1,0 +1,852 @@
+openapi: 3.1.0
+info:
+  title: TimeSync Scheduling API
+  version: 1.0.0
+  description: |
+    Enterprise AI Workforce Scheduling Platform REST API.
+
+    **Authentication:** All endpoints (except /auth/*) require a Bearer JWT token.
+
+    **Multi-tenancy:** All resources are automatically scoped to the authenticated user's organization.
+
+    **Rate limiting:** 500 requests/minute per API key.
+
+servers:
+  - url: https://api.timesync.io/v1
+    description: Production
+  - url: https://staging-api.timesync.io/v1
+    description: Staging
+  - url: http://localhost:4000/api/v1
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Organizations
+  - name: Employees
+  - name: Schedules
+  - name: Shifts
+  - name: Rules
+  - name: Analytics
+  - name: Copilot
+  - name: Time Off
+  - name: Integrations
+
+paths:
+
+  # ── AUTH ────────────────────────────────────────────────────────────
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                mfaCode: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke refresh token
+      responses:
+        '204': { description: Logged out }
+
+  # ── EMPLOYEES ───────────────────────────────────────────────────────
+
+  /employees:
+    get:
+      tags: [Employees]
+      summary: List employees
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [active, inactive, on_leave, terminated]
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: locationId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: employmentType
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [full_time, part_time, per_diem, contract, seasonal, intern, volunteer]
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items: { type: string }
+      responses:
+        '200':
+          description: Employee list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeListResponse'
+
+    post:
+      tags: [Employees]
+      summary: Create employee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmployeeRequest'
+      responses:
+        '201':
+          description: Employee created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeResponse'
+
+  /employees/{id}:
+    get:
+      tags: [Employees]
+      summary: Get employee by ID
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Employee detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Employees]
+      summary: Update employee
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmployeeRequest'
+      responses:
+        '200':
+          description: Employee updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeResponse'
+
+    delete:
+      tags: [Employees]
+      summary: Deactivate employee (soft delete)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204': { description: Employee deactivated }
+
+  /employees/{id}/availability:
+    get:
+      tags: [Employees]
+      summary: Get employee availability
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Availability windows
+    put:
+      tags: [Employees]
+      summary: Replace employee availability
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  /employees/{id}/certifications:
+    get:
+      tags: [Employees]
+      summary: List employee certifications
+      parameters:
+        - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Employees]
+      summary: Add certification to employee
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  # ── SCHEDULES ───────────────────────────────────────────────────────
+
+  /schedules:
+    get:
+      tags: [Schedules]
+      summary: List schedules
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, generating, review, published, archived]
+        - name: startDate
+          in: query
+          schema: { type: string, format: date }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Schedule list
+
+    post:
+      tags: [Schedules]
+      summary: Create schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, startDate, endDate]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date }
+                departmentIds:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Schedule created
+
+  /schedules/{id}:
+    get:
+      tags: [Schedules]
+      summary: Get schedule with shifts
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Full schedule with all shifts and assignments
+
+    delete:
+      tags: [Schedules]
+      summary: Delete schedule
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  /schedules/{id}/generate:
+    post:
+      tags: [Schedules]
+      summary: Trigger AI schedule generation
+      description: |
+        Asynchronously generates an optimized schedule using the AI engine.
+        Returns a job_id to poll for results.
+        Use GET /schedules/jobs/{jobId} to check status.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '202':
+          description: Generation started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string, enum: [queued] }
+
+  /schedules/jobs/{jobId}:
+    get:
+      tags: [Schedules]
+      summary: Get generation job status
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Job status and solutions (when completed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationJobResponse'
+
+  /schedules/{id}/publish:
+    post:
+      tags: [Schedules]
+      summary: Publish schedule (notify employees)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Schedule published
+
+  # ── SHIFTS ──────────────────────────────────────────────────────────
+
+  /shifts:
+    get:
+      tags: [Shifts]
+      summary: List shifts
+      parameters:
+        - name: scheduleId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: startDate
+          in: query
+          schema: { type: string, format: date }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: isOpen
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Shift list
+
+    post:
+      tags: [Shifts]
+      summary: Create shift
+      responses:
+        '201':
+          description: Shift created
+
+  /shifts/{id}:
+    get:
+      tags: [Shifts]
+      summary: Get shift
+      parameters:
+        - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Shifts]
+      summary: Update shift
+      parameters:
+        - $ref: '#/components/parameters/Id'
+    delete:
+      tags: [Shifts]
+      summary: Delete shift
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  /shifts/{id}/assign:
+    post:
+      tags: [Shifts]
+      summary: Assign employee to shift
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [employeeId]
+              properties:
+                employeeId: { type: string, format: uuid }
+                force: { type: boolean, description: Skip soft constraint warnings }
+      responses:
+        '200':
+          description: Employee assigned
+        '422':
+          description: Rule violation — returns violations list
+
+  /shifts/{id}/unassign:
+    post:
+      tags: [Shifts]
+      summary: Remove employee from shift
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  # ── RULES ───────────────────────────────────────────────────────────
+
+  /rules:
+    get:
+      tags: [Rules]
+      summary: List scheduling rules
+      responses:
+        '200':
+          description: Rules list
+    post:
+      tags: [Rules]
+      summary: Create rule
+      responses:
+        '201':
+          description: Rule created
+
+  /rules/{id}:
+    get:
+      tags: [Rules]
+      summary: Get rule
+      parameters:
+        - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Rules]
+      summary: Update rule
+      parameters:
+        - $ref: '#/components/parameters/Id'
+    delete:
+      tags: [Rules]
+      summary: Delete rule (non-system only)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  /rules/{id}/test:
+    post:
+      tags: [Rules]
+      summary: Test rule against current schedule
+      description: Dry-run evaluate the rule against the current published schedule and return violations.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  /rules/types:
+    get:
+      tags: [Rules]
+      summary: List all available rule types with parameter schemas
+      security: []
+      responses:
+        '200':
+          description: Rule type registry
+
+  # ── ANALYTICS ───────────────────────────────────────────────────────
+
+  /analytics/overview:
+    get:
+      tags: [Analytics]
+      summary: Get KPI metrics overview
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [week, month, quarter, year] }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+
+  /analytics/labor-cost:
+    get:
+      tags: [Analytics]
+      summary: Labor cost breakdown
+      parameters:
+        - name: startDate
+          in: query
+          schema: { type: string, format: date }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date }
+        - name: groupBy
+          in: query
+          schema: { type: string, enum: [department, role, location, employee] }
+
+  /analytics/coverage:
+    get:
+      tags: [Analytics]
+      summary: Coverage heatmap data
+      parameters:
+        - name: startDate
+          in: query
+          schema: { type: string, format: date }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date }
+
+  /analytics/overtime:
+    get:
+      tags: [Analytics]
+      summary: Overtime report
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [week, month] }
+
+  /analytics/forecast:
+    get:
+      tags: [Analytics]
+      summary: Labor cost and coverage forecast (4 weeks ahead)
+
+  # ── COPILOT ─────────────────────────────────────────────────────────
+
+  /copilot/conversations:
+    get:
+      tags: [Copilot]
+      summary: List conversations
+    post:
+      tags: [Copilot]
+      summary: Create conversation and get AI response (streaming SSE)
+      description: |
+        Returns a Server-Sent Events stream.
+        Event types: `chunk` (text delta), `done` (with actions array)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string }
+                scheduleId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /copilot/conversations/{id}/messages:
+    post:
+      tags: [Copilot]
+      summary: Send message in existing conversation (streaming SSE)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+
+  /copilot/conversations/{id}/execute:
+    post:
+      tags: [Copilot]
+      summary: Execute actions suggested by the copilot
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type: { type: string }
+                      shiftId: { type: string }
+                      employeeId: { type: string }
+
+# ── COMPONENTS ──────────────────────────────────────────────────────────
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Search:
+      name: search
+      in: query
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { type: object }
+        requestId: { type: string }
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer }
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            email: { type: string }
+            orgId: { type: string }
+            roles: { type: array, items: { type: string } }
+
+    GenerateRequest:
+      type: object
+      required: [startDate, endDate]
+      properties:
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        departmentIds:
+          type: array
+          items: { type: string, format: uuid }
+        locationIds:
+          type: array
+          items: { type: string, format: uuid }
+        optimizationGoals:
+          type: array
+          items:
+            type: string
+            enum: [minimize_cost, maximize_coverage, maximize_fairness, minimize_overtime, maximize_preference]
+          default: [maximize_coverage, minimize_cost, maximize_fairness]
+        maxRuntime:
+          type: integer
+          minimum: 5
+          maximum: 120
+          default: 30
+
+    GenerationJobResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            status:
+              type: string
+              enum: [queued, running, completed, failed, cancelled]
+            progress: { type: integer, minimum: 0, maximum: 100 }
+            solutions:
+              type: array
+              items:
+                $ref: '#/components/schemas/GenerationSolution'
+            hardViolations:
+              type: array
+              items:
+                $ref: '#/components/schemas/RuleViolation'
+            durationMs: { type: integer }
+            summary:
+              type: object
+              properties:
+                totalShifts: { type: integer }
+                assignedShifts: { type: integer }
+                unfilledShifts: { type: integer }
+                estimatedCost: { type: number }
+                overtimeHours: { type: number }
+
+    GenerationSolution:
+      type: object
+      properties:
+        index: { type: integer }
+        label: { type: string }
+        scores:
+          type: object
+          properties:
+            coverage: { type: number }
+            cost: { type: number }
+            fairness: { type: number }
+            preference: { type: number }
+            overall: { type: number }
+        stats:
+          type: object
+          properties:
+            totalCost: { type: number }
+            overtimeHours: { type: number }
+            unfilledShifts: { type: integer }
+        assignments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftAssignment'
+
+    RuleViolation:
+      type: object
+      properties:
+        ruleId: { type: string }
+        ruleName: { type: string }
+        severity: { type: string, enum: [error, warning] }
+        message: { type: string }
+        affectedEntities:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              id: { type: string }
+              name: { type: string }
+
+    ShiftAssignment:
+      type: object
+      properties:
+        shiftId: { type: string, format: uuid }
+        employeeId: { type: string, format: uuid }
+        status: { type: string }
+        assignedBy: { type: string, enum: [manual, ai, self_pickup] }
+        aiScore: { type: number }
+        aiExplanation:
+          type: object
+          properties:
+            reasons:
+              type: array
+              items:
+                type: object
+                properties:
+                  factor: { type: string }
+                  detail: { type: string }
+                  weight: {}
+                  score: { type: number }
+            alternativesConsidered:
+              type: array
+              items: { type: string }
+            overallScore: { type: number }
+
+    EmployeeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeSummary'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    EmployeeResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Employee'
+
+    EmployeeSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        employmentType: { type: string }
+        status: { type: string }
+        avatarUrl: { type: string }
+        displayColor: { type: string }
+        primaryDeptId: { type: string }
+
+    Employee:
+      allOf:
+        - $ref: '#/components/schemas/EmployeeSummary'
+        - type: object
+          properties:
+            phone: { type: string }
+            hireDate: { type: string, format: date }
+            weeklyHoursTarget: { type: number }
+            payRate: { type: number }
+            payRateType: { type: string }
+            overtimeEligible: { type: boolean }
+            unionMember: { type: boolean }
+            skills: { type: array }
+            certifications: { type: array }
+            availability: { type: array }
+            tags: { type: array, items: { type: string } }
+            customFields: { type: object }
+
+    CreateEmployeeRequest:
+      type: object
+      required: [firstName, lastName, email, employmentType]
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        employmentType:
+          type: string
+          enum: [full_time, part_time, per_diem, contract, seasonal, intern, volunteer]
+        primaryDeptId: { type: string, format: uuid }
+        primaryRoleId: { type: string, format: uuid }
+        primaryLocationId: { type: string, format: uuid }
+        payRate: { type: number }
+        payRateType: { type: string, enum: [hourly, salary, tipped, contract] }
+        weeklyHoursTarget: { type: number }
+        hireDate: { type: string, format: date }
+        tags: { type: array, items: { type: string } }
+        customFields: { type: object }
+
+    UpdateEmployeeRequest:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        phone: { type: string }
+        status: { type: string, enum: [active, inactive, on_leave] }
+        primaryDeptId: { type: string, format: uuid }
+        primaryRoleId: { type: string, format: uuid }
+        payRate: { type: number }
+        weeklyHoursTarget: { type: number }
+        tags: { type: array, items: { type: string } }
+        customFields: { type: object }
+
+    PaginationMeta:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        hasMore: { type: boolean }
