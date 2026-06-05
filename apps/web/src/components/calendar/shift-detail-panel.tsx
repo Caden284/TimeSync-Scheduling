@@ -10,8 +10,8 @@ import { cn, formatShiftTime, formatHours, getContrastColor } from '@/lib/utils'
 interface ShiftDetailPanelProps {
   shift: Shift;
   onClose: () => void;
-  onEdit?: () => void;
-  onDelete?: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }
 
 export function ShiftDetailPanel({ shift, onClose, onEdit, onDelete }: ShiftDetailPanelProps) {
