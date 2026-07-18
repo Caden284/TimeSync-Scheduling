@@ -2,7 +2,7 @@
 
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { createAdminUser } from '@/lib/auth';
+import { createAdminUser, linkProfileToOrg } from '@/lib/auth';
 import { createOrg } from '@/lib/db';
 import { Zap, CheckCircle, AlertCircle } from 'lucide-react';
 
@@ -29,7 +29,9 @@ export default function SetupAdminPage() {
 
     setLoading(true);
     try {
-      // Create org first
+      // 1. Create auth account (unauthenticated — only requires guests permission)
+      await createAdminUser(form.email, form.password, form.firstName, form.lastName);
+      // 2. Now signed in — create org document
       const org = await createOrg({
         name: form.orgName,
         vertical: form.vertical,
@@ -37,12 +39,12 @@ export default function SetupAdminPage() {
         primaryColor: '#6366f1',
         logoInitials: form.orgName.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase(),
       });
-      // Create admin user linked to that org
-      await createAdminUser(form.email, form.password, form.firstName, form.lastName, org.$id);
+      // 3. Create user profile linked to org
+      await linkProfileToOrg(org.$id);
       setStep('done');
       setTimeout(() => router.replace('/schedule'), 2000);
     } catch (err: any) {
-      setError(err?.message ?? 'Setup failed. Check that the database collections exist.');
+      setError(err?.message ?? 'Setup failed. Check that the database collections exist and Email/Password auth is enabled in Appwrite.');
     } finally {
       setLoading(false);
     }

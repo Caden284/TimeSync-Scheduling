@@ -49,16 +49,39 @@ export async function getCurrentUser(): Promise<{ session: Models.User<Models.Pr
   }
 }
 
-export async function createAdminUser(email: string, password: string, firstName: string, lastName: string, orgId: string) {
+// Step 1: create the Appwrite auth account and sign in (no DB writes — guest scope)
+export async function createAdminUser(email: string, password: string, firstName: string, lastName: string) {
   const user = await account.create(ID.unique(), email, password, `${firstName} ${lastName}`);
   await account.createEmailPasswordSession(email, password);
+  return user;
+}
+
+// Step 2: called after sign-in and org creation — writes profile as authenticated user
+export async function linkProfileToOrg(orgId: string) {
+  const session = await account.get();
+  const name = session.name.split(' ');
+  return databases.createDocument(DATABASE_ID, COLLECTIONS.USER_PROFILES, ID.unique(), {
+    userId: session.$id,
+    role: 'admin',
+    orgId,
+    firstName: name[0] ?? '',
+    lastName: name.slice(1).join(' ') ?? '',
+    email: session.email,
+  });
+}
+
+// Invite a staff or admin user (called while admin is already signed in)
+export async function inviteUser(email: string, password: string, firstName: string, lastName: string, role: 'admin' | 'staff', orgId: string, employeeId?: string) {
+  const user = await account.create(ID.unique(), email, password, `${firstName} ${lastName}`);
+  // Create the profile document as the currently-signed-in admin
   await databases.createDocument(DATABASE_ID, COLLECTIONS.USER_PROFILES, ID.unique(), {
     userId: user.$id,
-    role: 'admin',
+    role,
     orgId,
     firstName,
     lastName,
     email,
+    employeeId: employeeId ?? null,
   });
   return user;
 }

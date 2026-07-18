@@ -12,9 +12,11 @@ import {
   Clock, CreditCard, ChevronRight, Check, Globe,
 } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
-import { account, databases, DATABASE_ID, COLLECTIONS, ID } from '@/lib/appwrite';
+import { inviteUser } from '@/lib/auth';
+import { useAuth } from '@/context/auth-context';
 
 function InviteUserForm() {
+  const { profile } = useAuth();
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', password: '', role: 'staff' });
   const [status, setStatus] = useState<'idle'|'saving'|'done'|'error'>('idle');
   const [errMsg, setErrMsg] = useState('');
@@ -24,15 +26,10 @@ function InviteUserForm() {
     e.preventDefault();
     setStatus('saving');
     try {
-      const user = await account.create(ID.unique(), form.email, form.password, `${form.firstName} ${form.lastName}`);
-      // Get current org id from Appwrite session
-      const session = await account.get();
-      const profs = await databases.listDocuments(DATABASE_ID, COLLECTIONS.USER_PROFILES);
-      const adminProfile = profs.documents.find((d: any) => d.userId === session.$id);
-      await databases.createDocument(DATABASE_ID, COLLECTIONS.USER_PROFILES, ID.unique(), {
-        userId: user.$id, role: form.role, orgId: adminProfile?.orgId ?? 'unknown',
-        firstName: form.firstName, lastName: form.lastName, email: form.email,
-      });
+      await inviteUser(
+        form.email, form.password, form.firstName, form.lastName,
+        form.role as 'admin' | 'staff', profile?.orgId ?? '',
+      );
       setStatus('done');
       setForm({ firstName: '', lastName: '', email: '', password: '', role: 'staff' });
     } catch (err: any) {
