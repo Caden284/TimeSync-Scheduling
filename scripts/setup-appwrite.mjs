@@ -5,7 +5,7 @@
  *   node scripts/setup-appwrite.mjs YOUR_API_KEY
  */
 
-import { Client, Databases, Permission, Role, IndexType } from 'node-appwrite';
+import { Client, Databases, Permission, Role } from 'node-appwrite';
 
 const ENDPOINT   = 'https://nyc.cloud.appwrite.io/v1';
 const PROJECT_ID = '6a5ac65d000f4a62b039';
@@ -227,7 +227,7 @@ async function createIndexes() {
 
   for (const [col, key, attrs] of indexes) {
     await safeCreate(
-      () => db.createIndex(DATABASE_ID, col, key, IndexType.Key, attrs),
+      () => db.createIndex(DATABASE_ID, col, key, 'key', attrs),
       `${col}.${key}`
     );
     await sleep(300);
