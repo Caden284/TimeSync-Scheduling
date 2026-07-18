@@ -1,13 +1,20 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/auth-context';
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const router  = useRouter();
-  const { login } = useAuth();
+  const { user, profile, login, loading } = useAuth();
+
+  // Already signed in — redirect immediately
+  useEffect(() => {
+    if (!loading && user) {
+      router.replace(profile?.role === 'staff' ? '/my-schedule' : '/schedule');
+    }
+  }, [loading, user, profile]);
 
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
