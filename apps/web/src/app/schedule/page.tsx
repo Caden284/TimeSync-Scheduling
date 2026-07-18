@@ -9,9 +9,12 @@ import { ShiftDetailPanel } from '@/components/calendar/shift-detail-panel';
 import { EditShiftModal } from '@/components/calendar/edit-shift-modal';
 import { NewShiftModal } from '@/components/calendar/new-shift-modal';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { AuthGuard } from '@/components/auth/auth-guard';
 import { useAppStore, useCalendarStore } from '@/store';
 import { mockShifts, mockSchedule } from '@/lib/mock-data';
 import { loadSetup } from '@/lib/org-store';
+import { useAuth } from '@/context/auth-context';
+import { getShifts, createShift, updateShift, deleteShift } from '@/lib/db';
 import type { Shift } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Plus, Download } from 'lucide-react';
@@ -101,11 +104,45 @@ function exportSchedulePDF(shifts: Shift[], weekLabel: string, orgName: string) 
   win.document.close();
 }
 
+// ── Appwrite doc → Shift shape ───────────────────────────────────────────────
+
+function docToShift(doc: any): Shift {
+  return {
+    id: doc.$id,
+    orgId: doc.orgId,
+    scheduleId: doc.scheduleId,
+    title: doc.title,
+    date: doc.date,
+    startTime: doc.startTime,
+    endTime: doc.endTime,
+    startDatetime: `${doc.date}T${doc.startTime}`,
+    endDatetime: `${doc.date}T${doc.endTime}`,
+    durationHours: 8,
+    crossesMidnight: doc.shiftType === 'overnight',
+    breakMinutes: 0,
+    requiredSkills: [],
+    requiredCerts: [],
+    shiftType: doc.shiftType ?? 'fixed',
+    status: doc.status ?? 'scheduled',
+    isOpen: doc.isOpen ?? false,
+    minStaff: doc.minStaff ?? 1,
+    maxStaff: doc.maxStaff,
+    color: doc.color ?? '#6366f1',
+    notes: doc.notes,
+    assignments: [],
+    metadata: {},
+    createdAt: doc.$createdAt,
+    department: doc.departmentId ? { id: doc.departmentId, name: doc.departmentName ?? '', color: doc.departmentColor ?? '#6366f1', orgId: doc.orgId, isActive: true } : undefined,
+    location: doc.locationId ? { id: doc.locationId, name: doc.locationName ?? '', orgId: doc.orgId, isActive: true } : undefined,
+  };
+}
+
 // ── Page component ───────────────────────────────────────────────────────────
 
 export default function SchedulePage() {
   const { setOrg, copilotOpen, setActiveSchedule } = useAppStore();
   const { view, currentDate } = useCalendarStore();
+  const { profile } = useAuth();
 
   const [shifts, setShifts]           = useState<Shift[]>(mockShifts);
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
@@ -114,6 +151,23 @@ export default function SchedulePage() {
   const [newShiftDate, setNewShiftDate] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
   const [schedule, setSchedule]       = useState(mockSchedule);
+
+  // Load real shifts from Appwrite when week changes
+  useEffect(() => {
+    if (!profile?.orgId) return;
+    const parsedD = parseISO(currentDate + 'T00:00:00');
+    const ws = startOfWeek(parsedD, { weekStartsOn: 0 });
+    const we = endOfWeek(parsedD, { weekStartsOn: 0 });
+    getShifts(profile.orgId, format(ws, 'yyyy-MM-dd'), format(we, 'yyyy-MM-dd'))
+      .then(docs => {
+        if (docs.length > 0) {
+          setShifts(docs.map(docToShift));
+        } else {
+          setShifts(mockShifts);
+        }
+      })
+      .catch(() => setShifts(mockShifts));
+  }, [profile?.orgId, currentDate]);
 
   useEffect(() => {
     const setup = loadSetup();
@@ -146,10 +200,10 @@ export default function SchedulePage() {
     setShowNewShift(true);
   }
 
-  function handleNewShiftSave(partial: any) {
+  async function handleNewShiftSave(partial: any) {
     const newShift: Shift = {
       id: `shift-${Date.now()}`,
-      orgId: 'local',
+      orgId: profile?.orgId ?? 'local',
       ...partial,
       startDatetime: `${partial.date}T${partial.startTime}`,
       endDatetime:   `${partial.date}T${partial.endTime}`,
@@ -165,18 +219,64 @@ export default function SchedulePage() {
       createdAt: new Date().toISOString(),
     };
     setShifts(prev => [...prev, newShift]);
+    // Persist to Appwrite if authenticated
+    if (profile?.orgId) {
+      try {
+        const doc = await createShift({
+          orgId: profile.orgId,
+          title: partial.title,
+          date: partial.date,
+          startTime: partial.startTime,
+          endTime: partial.endTime,
+          departmentId: partial.departmentId,
+          departmentName: partial.department?.name,
+          departmentColor: partial.department?.color,
+          locationId: partial.locationId,
+          locationName: partial.location?.name,
+          shiftType: partial.shiftType ?? 'fixed',
+          status: partial.status ?? 'scheduled',
+          isOpen: partial.isOpen ?? false,
+          minStaff: partial.minStaff ?? 1,
+          maxStaff: partial.maxStaff,
+          color: partial.color,
+          notes: partial.notes,
+        });
+        // Update ID to the real Appwrite ID
+        setShifts(prev => prev.map(s => s.id === newShift.id ? { ...s, id: doc.$id } : s));
+      } catch (e) {
+        console.error('Failed to save shift to Appwrite:', e);
+      }
+    }
   }
 
-  function handleSaveShift(updated: Partial<Shift>) {
+  async function handleSaveShift(updated: Partial<Shift>) {
     setShifts(prev => prev.map(s => s.id === selectedShift?.id ? { ...s, ...updated } : s));
     setSelectedShift(prev => prev ? { ...prev, ...updated } : null);
     setModalMode(null);
+    if (selectedShift?.id && profile?.orgId) {
+      try {
+        await updateShift(selectedShift.id, {
+          title: updated.title,
+          date: updated.date,
+          startTime: updated.startTime,
+          endTime: updated.endTime,
+          color: updated.color,
+          notes: updated.notes,
+          status: updated.status,
+        });
+      } catch (e) {
+        console.error('Failed to update shift in Appwrite:', e);
+      }
+    }
   }
 
-  function handleDeleteShift(shiftId: string) {
+  async function handleDeleteShift(shiftId: string) {
     setShifts(prev => prev.filter(s => s.id !== shiftId));
     setSelectedShift(null);
     setModalMode(null);
+    if (profile?.orgId) {
+      try { await deleteShift(shiftId); } catch (e) { console.error('Failed to delete shift:', e); }
+    }
   }
 
   function handleGenerate() {
@@ -196,6 +296,7 @@ export default function SchedulePage() {
   }
 
   return (
+    <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
 
@@ -278,5 +379,6 @@ export default function SchedulePage() {
         />
       )}
     </div>
+    </AuthGuard>
   );
 }

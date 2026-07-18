@@ -2,17 +2,20 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { isOnboardingComplete } from '@/lib/org-store';
+import { useAuth } from '@/context/auth-context';
 
 export default function RootPage() {
   const router = useRouter();
+  const { user, profile, loading } = useAuth();
+
   useEffect(() => {
-    if (isOnboardingComplete()) {
-      router.replace('/schedule');
-    } else {
-      router.replace('/onboarding');
+    if (loading) return;
+    if (!user) {
+      router.replace('/login');
+      return;
     }
-  }, []);
+    router.replace(profile?.role === 'staff' ? '/my-schedule' : '/schedule');
+  }, [loading, user, profile]);
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">

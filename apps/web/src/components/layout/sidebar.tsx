@@ -3,6 +3,7 @@
 import { cn, getContrastColor } from '@/lib/utils';
 import { useAppStore } from '@/store';
 import { loadSetup, clearSetup } from '@/lib/org-store';
+import { useAuth } from '@/context/auth-context';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -27,6 +28,7 @@ export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useAppStore();
   const pathname = usePathname();
   const router = useRouter();
+  const { profile, logout } = useAuth();
   const [orgName, setOrgName] = useState('TimeSync');
   const [orgColor, setOrgColor] = useState('#6366f1');
   const [orgInitials, setOrgInitials] = useState('TS');
@@ -39,6 +41,11 @@ export function Sidebar() {
       setOrgInitials(setup.org.logoInitials);
     }
   }, []);
+
+  async function handleLogout() {
+    await logout();
+    router.replace('/login');
+  }
 
   function handleReset() {
     if (confirm('Reset TimeSync and start a new organization? All local data will be cleared.')) {
@@ -113,33 +120,28 @@ export function Sidebar() {
           {!sidebarCollapsed && 'Settings'}
         </Link>
 
-        {/* Reset / New org */}
-        <button
-          onClick={handleReset}
-          title={sidebarCollapsed ? 'Start new organization' : undefined}
-          className={cn(
-            'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-500 hover:bg-gray-800 hover:text-red-400 transition-colors',
-            sidebarCollapsed && 'justify-center px-2'
-          )}
-        >
-          <LogOut size={16} className="shrink-0" />
-          {!sidebarCollapsed && <span className="text-xs">New Organization</span>}
-        </button>
-
-        {/* User badge */}
+        {/* User badge + logout */}
         <div className={cn(
           'flex items-center gap-2.5 rounded-lg px-2.5 py-2 mt-1',
           sidebarCollapsed && 'justify-center px-2'
         )}>
           <div className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ backgroundColor: orgColor, color: logoFg }}>
-            {orgInitials[0] ?? '?'}
+            {profile ? `${profile.firstName[0]}${profile.lastName[0]}` : (orgInitials[0] ?? '?')}
           </div>
           {!sidebarCollapsed && (
             <div className="overflow-hidden flex-1">
-              <p className="text-xs font-medium text-white truncate">{orgName}</p>
-              <p className="text-[10px] text-gray-500 truncate">Administrator</p>
+              <p className="text-xs font-medium text-white truncate">
+                {profile ? `${profile.firstName} ${profile.lastName}` : orgName}
+              </p>
+              <p className="text-[10px] text-gray-500 truncate capitalize">{profile?.role ?? 'Administrator'}</p>
             </div>
+          )}
+          {!sidebarCollapsed && (
+            <button onClick={handleLogout} title="Sign out"
+              className="text-gray-600 hover:text-red-400 transition-colors">
+              <LogOut size={14} />
+            </button>
           )}
         </div>
       </div>

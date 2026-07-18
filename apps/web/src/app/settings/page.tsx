@@ -12,9 +12,66 @@ import {
   Clock, CreditCard, ChevronRight, Check, Globe,
 } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { account, databases, DATABASE_ID, COLLECTIONS, ID } from '@/lib/appwrite';
+
+function InviteUserForm() {
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', password: '', role: 'staff' });
+  const [status, setStatus] = useState<'idle'|'saving'|'done'|'error'>('idle');
+  const [errMsg, setErrMsg] = useState('');
+  function update(k: string, v: string) { setForm(p => ({ ...p, [k]: v })); }
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus('saving');
+    try {
+      const user = await account.create(ID.unique(), form.email, form.password, `${form.firstName} ${form.lastName}`);
+      // Get current org id from Appwrite session
+      const session = await account.get();
+      const profs = await databases.listDocuments(DATABASE_ID, COLLECTIONS.USER_PROFILES);
+      const adminProfile = profs.documents.find((d: any) => d.userId === session.$id);
+      await databases.createDocument(DATABASE_ID, COLLECTIONS.USER_PROFILES, ID.unique(), {
+        userId: user.$id, role: form.role, orgId: adminProfile?.orgId ?? 'unknown',
+        firstName: form.firstName, lastName: form.lastName, email: form.email,
+      });
+      setStatus('done');
+      setForm({ firstName: '', lastName: '', email: '', password: '', role: 'staff' });
+    } catch (err: any) {
+      setErrMsg(err?.message ?? 'Failed to create user.');
+      setStatus('error');
+    }
+  }
+
+  const inputCls = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500';
+  return (
+    <form onSubmit={handleInvite} className="col-span-2 space-y-3">
+      {status === 'done' && <p className="text-sm text-green-600 font-medium">✅ User created successfully. They can now log in.</p>}
+      {status === 'error' && <p className="text-sm text-red-500">{errMsg}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="block text-xs text-gray-600 mb-1">First Name</label>
+          <input required value={form.firstName} onChange={e => update('firstName', e.target.value)} className={inputCls} /></div>
+        <div><label className="block text-xs text-gray-600 mb-1">Last Name</label>
+          <input required value={form.lastName} onChange={e => update('lastName', e.target.value)} className={inputCls} /></div>
+      </div>
+      <div><label className="block text-xs text-gray-600 mb-1">Email</label>
+        <input type="email" required value={form.email} onChange={e => update('email', e.target.value)} className={inputCls} /></div>
+      <div><label className="block text-xs text-gray-600 mb-1">Temporary Password (min 8 chars)</label>
+        <input type="password" required minLength={8} value={form.password} onChange={e => update('password', e.target.value)} className={inputCls} /></div>
+      <div><label className="block text-xs text-gray-600 mb-1">Role</label>
+        <select value={form.role} onChange={e => update('role', e.target.value)} className={inputCls}>
+          <option value="staff">Staff (view own schedule only)</option>
+          <option value="admin">Admin (full access)</option>
+        </select>
+      </div>
+      <Button type="submit" variant="primary" size="sm" disabled={status === 'saving'}>
+        {status === 'saving' ? 'Creating…' : 'Create User Account'}
+      </Button>
+    </form>
+  );
+}
 
 const NAV_SECTIONS = [
   { id: 'organization', label: 'Organization',   icon: Building2 },
+  { id: 'users',        label: 'Users & Access', icon: Users },
   { id: 'scheduling',   label: 'Scheduling',     icon: Clock },
   { id: 'notifications',label: 'Notifications',  icon: Bell },
   { id: 'security',     label: 'Security & Auth', icon: Shield },
@@ -169,6 +226,29 @@ export default function SettingsPage() {
                       <Toggle label="Schedule published" desc="Notify employees when a new schedule is published" value={form.shiftPublished} onChange={v => update('shiftPublished', v)} />
                       <Toggle label="Shift swap requests" desc="Notify managers when employees request swaps" value={form.shiftSwapRequests} onChange={v => update('shiftSwapRequests', v)} />
                       <Toggle label="Schedule changes" desc="Notify employees when their shift is changed" value={form.scheduleChanges} onChange={v => update('scheduleChanges', v)} />
+                    </SettingsCard>
+                  </>
+                )}
+
+                {/* ── Users & Access ────────────────────── */}
+                {activeSection === 'users' && (
+                  <>
+                    <SectionHeader title="Users & Access" desc="Manage admin and staff accounts. Staff can only view their own schedule." />
+                    <SettingsCard>
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-gray-900">Invite New User</h3>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <InviteUserForm />
+                        </div>
+                      </div>
+                    </SettingsCard>
+                    <SettingsCard>
+                      <p className="text-xs text-gray-500">
+                        <strong className="text-gray-700">Admin</strong> — full access to all schedules, employees, reports, and settings.<br/>
+                        <strong className="text-gray-700">Staff</strong> — can only log in and view <em>their own</em> assigned shifts at <code className="bg-gray-100 px-1 rounded">/my-schedule</code>.
+                      </p>
                     </SettingsCard>
                   </>
                 )}
