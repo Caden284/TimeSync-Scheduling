@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { AuthGuard } from '@/components/auth/auth-guard';
 import { useAppStore } from '@/store';
 import { mockOrg } from '@/lib/mock-data';
 import { Sparkles, Zap, BarChart3, Calendar, Users, ShieldCheck } from 'lucide-react';
@@ -52,6 +53,7 @@ export default function CopilotPage() {
   useEffect(() => { setOrg(mockOrg); }, []);
 
   return (
+    <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -143,5 +145,6 @@ export default function CopilotPage() {
         </div>
       </div>
     </div>
+    </AuthGuard>
   );
 }

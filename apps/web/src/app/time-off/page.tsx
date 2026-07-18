@@ -9,8 +9,12 @@ import { Avatar } from '@/components/ui/avatar';
 import { useAppStore } from '@/store';
 import { mockOrg, mockEmployees } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
-import { Plus, Check, X, Clock, Calendar, ChevronRight } from 'lucide-react';
+import { Plus, Check, X, Clock, Calendar } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { AuthGuard } from '@/components/auth/auth-guard';
+import { NewRequestModal } from '@/components/time-off/new-request-modal';
+import { useAuth } from '@/context/auth-context';
+import { getTimeOffRequests, updateTimeOffStatus } from '@/lib/db';
 
 interface TimeOffRequest {
   id: string;
@@ -51,22 +55,42 @@ const LEAVE_COLORS: Record<string, string> = {
 
 export default function TimeOffPage() {
   const { setOrg, copilotOpen } = useAppStore();
+  const { profile } = useAuth();
   const [requests, setRequests] = useState<TimeOffRequest[]>(MOCK_REQUESTS);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'denied'>('all');
+  const [showNewModal, setShowNewModal] = useState(false);
 
-  useEffect(() => { setOrg(mockOrg); }, []);
+  useEffect(() => {
+    setOrg(mockOrg);
+    if (profile?.orgId) {
+      getTimeOffRequests(profile.orgId).then(docs => {
+        if (docs.length > 0) {
+          setRequests(docs.map((d: any) => ({
+            id: d.$id, employeeId: d.employeeId, employeeName: d.employeeName,
+            avatarColor: '#6366f1', leaveType: d.leaveType,
+            startDate: d.startDate, endDate: d.endDate, hours: 8,
+            reason: d.reason ?? '', status: d.status,
+            submittedAt: d.$createdAt?.split('T')[0] ?? '',
+          })));
+        }
+      }).catch(() => {});
+    }
+  }, [profile?.orgId]);
 
   const filtered = requests.filter(r => filter === 'all' || r.status === filter);
   const pendingCount = requests.filter(r => r.status === 'pending').length;
 
-  function approve(id: string) {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' } : r));
+  async function approve(id: string) {
+    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' as const } : r));
+    try { await updateTimeOffStatus(id, 'approved'); } catch {}
   }
-  function deny(id: string) {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'denied' } : r));
+  async function deny(id: string) {
+    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'denied' as const } : r));
+    try { await updateTimeOffStatus(id, 'denied'); } catch {}
   }
 
   return (
+    <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -74,7 +98,8 @@ export default function TimeOffPage() {
           title="Time Off"
           subtitle={`${pendingCount} request${pendingCount !== 1 ? 's' : ''} pending approval`}
           actions={
-            <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs">
+            <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs"
+              onClick={() => setShowNewModal(true)}>
               New Request
             </Button>
           }
@@ -185,6 +210,12 @@ export default function TimeOffPage() {
           {copilotOpen && <CopilotPanel />}
         </div>
       </div>
+
+      {showNewModal && (
+        <NewRequestModal onClose={() => setShowNewModal(false)}
+          onSaved={req => setRequests(prev => [req, ...prev])} />
+      )}
     </div>
+    </AuthGuard>
   );
 }

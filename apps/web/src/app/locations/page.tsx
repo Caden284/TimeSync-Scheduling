@@ -8,14 +8,28 @@ import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { mockOrg, mockLocations, mockDepartments, mockEmployees } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
-import { Plus, MapPin, Users, Building2, Phone, Globe, ChevronRight, Edit2 } from 'lucide-react';
+import { Plus, MapPin, Users, Building2, X, Globe, Edit2 } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { AuthGuard } from '@/components/auth/auth-guard';
+import { AddLocationModal } from '@/components/locations/add-location-modal';
+import { useAuth } from '@/context/auth-context';
+import { getLocations } from '@/lib/db';
 
 export default function LocationsPage() {
   const { setOrg, copilotOpen } = useAppStore();
-  const [selected, setSelected] = useState<typeof mockLocations[0] | null>(null);
+  const { profile } = useAuth();
+  const [locations, setLocations] = useState<any[]>(mockLocations);
+  const [selected, setSelected] = useState<any | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
-  useEffect(() => { setOrg(mockOrg); }, []);
+  useEffect(() => {
+    setOrg(mockOrg);
+    if (profile?.orgId) {
+      getLocations(profile.orgId).then(docs => {
+        if (docs.length > 0) setLocations(docs.map(d => ({ ...d, id: d.$id })));
+      }).catch(() => {});
+    }
+  }, [profile?.orgId]);
 
   function getDeptCount(locationId: string) {
     return mockDepartments.filter(d => d.locationId === locationId).length;
@@ -25,14 +39,16 @@ export default function LocationsPage() {
   }
 
   return (
+    <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar
           title="Locations"
-          subtitle={`${mockLocations.length} locations across ${[...new Set(mockLocations.map(l => l.state))].length} state(s)`}
+          subtitle={`${locations.length} location${locations.length !== 1 ? 's' : ''}`}
           actions={
-            <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs">
+            <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs"
+              onClick={() => setShowAddModal(true)}>
               Add Location
             </Button>
           }
@@ -43,9 +59,9 @@ export default function LocationsPage() {
             {/* Stats row */}
             <div className="grid grid-cols-3 gap-4 mb-6">
               {[
-                { label: 'Total Locations', value: mockLocations.length,   icon: <MapPin size={16} className="text-indigo-500" /> },
+                { label: 'Total Locations', value: locations.length,        icon: <MapPin size={16} className="text-indigo-500" /> },
                 { label: 'Total Departments', value: mockDepartments.length, icon: <Building2 size={16} className="text-purple-500" /> },
-                { label: 'Total Employees', value: mockEmployees.length,   icon: <Users size={16} className="text-blue-500" /> },
+                { label: 'Total Employees', value: mockEmployees.length,    icon: <Users size={16} className="text-blue-500" /> },
               ].map(stat => (
                 <div key={stat.label} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
                   <div className="h-9 w-9 rounded-lg bg-gray-50 flex items-center justify-center">{stat.icon}</div>
@@ -59,7 +75,7 @@ export default function LocationsPage() {
 
             {/* Location cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {mockLocations.map(loc => {
+              {locations.map(loc => {
                 const deptCount = getDeptCount(loc.id);
                 const empCount = getEmployeeCount(loc.id);
                 const depts = mockDepartments.filter(d => d.locationId === loc.id);
@@ -175,6 +191,12 @@ export default function LocationsPage() {
           {copilotOpen && <CopilotPanel />}
         </div>
       </div>
+
+      {showAddModal && (
+        <AddLocationModal onClose={() => setShowAddModal(false)}
+          onSaved={loc => setLocations(prev => [...prev, loc])} />
+      )}
     </div>
+    </AuthGuard>
   );
 }

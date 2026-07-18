@@ -18,6 +18,7 @@ import { DollarSign, Clock, Users, AlertTriangle, TrendingUp, Activity } from 'l
 import { formatCurrency } from '@/lib/utils';
 import { format, addDays, startOfWeek } from 'date-fns';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { AuthGuard } from '@/components/auth/auth-guard';
 
 const ICONS = [
   <DollarSign size={16} />, <Clock size={16} />, <Users size={16} />,
@@ -38,6 +39,7 @@ export default function AnalyticsPage() {
   const weekDates = getWeekDates();
 
   return (
+    <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -216,5 +218,6 @@ export default function AnalyticsPage() {
         </div>
       </div>
     </div>
+    </AuthGuard>
   );
 }

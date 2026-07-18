@@ -8,9 +8,11 @@ import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store';
 import { mockOrg, mockRules } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
-import { Plus, ShieldCheck, ShieldAlert, ChevronRight, ToggleLeft, ToggleRight, Settings2, Zap } from 'lucide-react';
+import { Plus, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, Zap, X, ChevronRight } from 'lucide-react';
 import type { SchedulingRule } from '@/types';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { AuthGuard } from '@/components/auth/auth-guard';
+import { NewRuleModal } from '@/components/rules/new-rule-modal';
 
 const RULE_TYPE_ICONS: Record<string, string> = {
   MIN_STAFFING: '👥', MAX_STAFFING: '🔢', REQUIRE_SKILL: '⭐', REQUIRE_CERT: '🏅',
@@ -26,17 +28,23 @@ export default function RulesPage() {
   const { setOrg, copilotOpen } = useAppStore();
   const [rules, setRules] = useState(mockRules);
   const [selected, setSelected] = useState<SchedulingRule | null>(null);
+  const [showNewModal, setShowNewModal] = useState(false);
 
   useEffect(() => { setOrg(mockOrg); }, []);
 
   function toggleRule(id: string) {
     setRules((prev) => prev.map((r) => r.id === id ? { ...r, isEnabled: !r.isEnabled } : r));
   }
+  function deleteRule(id: string) {
+    setRules(prev => prev.filter(r => r.id !== id));
+    if (selected?.id === id) setSelected(null);
+  }
 
   const hardRules = rules.filter((r) => r.constraintType === 'hard');
   const softRules = rules.filter((r) => r.constraintType === 'soft');
 
   return (
+    <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -44,7 +52,8 @@ export default function RulesPage() {
           title="Rule Engine"
           subtitle={`${rules.filter((r) => r.isEnabled).length} active rules · ${hardRules.length} hard, ${softRules.length} soft`}
           actions={
-            <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs">
+            <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs"
+              onClick={() => setShowNewModal(true)}>
               New Rule
             </Button>
           }
@@ -147,9 +156,12 @@ export default function RulesPage() {
                 </Section>
 
                 <div className="flex gap-2 pt-2">
-                  <Button variant="primary" size="sm" className="flex-1">Edit Rule</Button>
+                  <Button variant="primary" size="sm" className="flex-1"
+                    onClick={() => toggleRule(selected.id)}>
+                    {selected.isEnabled ? 'Disable Rule' : 'Enable Rule'}
+                  </Button>
                   {!selected.isSystem && (
-                    <Button variant="danger" size="sm">Delete</Button>
+                    <Button variant="danger" size="sm" onClick={() => deleteRule(selected.id)}>Delete</Button>
                   )}
                 </div>
               </div>
@@ -159,7 +171,13 @@ export default function RulesPage() {
           {copilotOpen && <CopilotPanel />}
         </div>
       </div>
+
+      {showNewModal && (
+        <NewRuleModal onClose={() => setShowNewModal(false)}
+          onSaved={rule => setRules(prev => [...prev, rule as any])} />
+      )}
     </div>
+    </AuthGuard>
   );
 }
 
