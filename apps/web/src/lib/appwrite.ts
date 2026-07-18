@@ -1,7 +1,7 @@
 import { Client, Account, Databases, Query, ID } from 'appwrite';
 
-export const APPWRITE_ENDPOINT = 'https://nyc.cloud.appwrite.io/v1';
-export const APPWRITE_PROJECT_ID = '6a5ac65d000f4a62b039';
+export const APPWRITE_ENDPOINT = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT ?? 'https://nyc.cloud.appwrite.io/v1';
+export const APPWRITE_PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID ?? '6a5ac65d000f4a62b039';
 export const DATABASE_ID = 'timesync-db';
 
 // Collection IDs (must match what setup script creates)
