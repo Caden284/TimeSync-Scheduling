@@ -16,23 +16,23 @@ export default function LoginPage() {
     }
   }, [loading, user, profile]);
 
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [showPw, setShowPw]     = useState(false);
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [email, setEmail]         = useState('');
+  const [password, setPassword]   = useState('');
+  const [showPw, setShowPw]       = useState(false);
+  const [error, setError]         = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    setLoading(true);
+    setSubmitting(true);
     try {
       await login(email, password);
       router.replace('/schedule');
     } catch (err: any) {
       setError(err?.message ?? 'Invalid email or password.');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
@@ -80,9 +80,9 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button type="submit" disabled={loading}
+          <button type="submit" disabled={submitting}
             className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2">
-            {loading ? (
+            {submitting ? (
               <>
                 <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                 Signing in…
