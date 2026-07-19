@@ -11,7 +11,7 @@ import { AddEmployeeModal } from '@/components/employees/add-employee-modal';
 import { EditEmployeeModal } from '@/components/employees/edit-employee-modal';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/context/auth-context';
-import { mockOrg, mockEmployees } from '@/lib/mock-data';
+import { mockOrg } from '@/lib/mock-data';
 import { getEmployees } from '@/lib/db';
 import { employmentTypeBadge, getEmployeeDisplayName, cn } from '@/lib/utils';
 import { Search, Plus, Filter, MoreHorizontal, Mail, Phone, Edit2, X } from 'lucide-react';
@@ -26,7 +26,8 @@ const EMPLOYMENT_TYPES = ['all', 'full_time', 'part_time', 'contract', 'per_diem
 export default function EmployeesPage() {
   const { setOrg, copilotOpen } = useAppStore();
   const { profile } = useAuth();
-  const [employees, setEmployees] = useState<any[]>(mockEmployees);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -37,9 +38,12 @@ export default function EmployeesPage() {
   useEffect(() => {
     setOrg(mockOrg);
     if (profile?.orgId) {
-      getEmployees(profile.orgId).then(docs => {
-        if (docs.length > 0) setEmployees(docs.map(d => ({ ...d, id: d.$id })));
-      }).catch(() => {});
+      getEmployees(profile.orgId)
+        .then(docs => setEmployees(docs.map(d => ({ ...d, id: d.$id }))))
+        .catch(() => {})
+        .finally(() => setLoadingEmployees(false));
+    } else {
+      setLoadingEmployees(false);
     }
   }, [profile?.orgId]);
 
@@ -120,9 +124,18 @@ export default function EmployeesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {filtered.length === 0 && (
+                    {loadingEmployees && (
+                      <tr><td colSpan={5} className="py-12 text-center text-sm text-gray-400">Loading…</td></tr>
+                    )}
+                    {!loadingEmployees && employees.length === 0 && (
+                      <tr><td colSpan={5} className="py-12 text-center">
+                        <p className="text-sm font-medium text-gray-700 mb-1">No employees yet</p>
+                        <p className="text-xs text-gray-400">Click &ldquo;Add Employee&rdquo; to add your first team member.</p>
+                      </td></tr>
+                    )}
+                    {!loadingEmployees && employees.length > 0 && filtered.length === 0 && (
                       <tr><td colSpan={5} className="py-12 text-center text-sm text-gray-400">
-                        No employees found. {search && 'Try a different search.'}
+                        No employees match your search.
                       </td></tr>
                     )}
                     {filtered.map(emp => {
