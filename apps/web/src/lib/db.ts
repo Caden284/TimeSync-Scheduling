@@ -1,6 +1,16 @@
 'use client';
 
 import { databases, DATABASE_ID, COLLECTIONS, ID, Query } from './appwrite';
+import { Permission, Role } from 'appwrite';
+
+// Any logged-in user can read, update, and delete documents created by this app
+function userPerms() {
+  return [
+    Permission.read(Role.users()),
+    Permission.update(Role.users()),
+    Permission.delete(Role.users()),
+  ];
+}
 
 // ── Organizations ─────────────────────────────────────────────────────────────
 
@@ -12,7 +22,7 @@ export async function createOrg(data: {
   name: string; vertical: string; timezone: string;
   primaryColor: string; logoInitials: string;
 }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.ORGANIZATIONS, ID.unique(), data);
+  return databases.createDocument(DATABASE_ID, COLLECTIONS.ORGANIZATIONS, ID.unique(), data, userPerms());
 }
 
 export async function updateOrg(orgId: string, data: Partial<{
@@ -34,7 +44,7 @@ export async function getDepartments(orgId: string) {
 }
 
 export async function createDepartment(orgId: string, name: string, color: string) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.DEPARTMENTS, ID.unique(), { orgId, name, color });
+  return databases.createDocument(DATABASE_ID, COLLECTIONS.DEPARTMENTS, ID.unique(), { orgId, name, color }, userPerms());
 }
 
 export async function deleteDepartment(deptId: string) {
@@ -53,7 +63,7 @@ export async function getLocations(orgId: string) {
 }
 
 export async function createLocation(orgId: string, data: { name: string; city?: string; state?: string }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.LOCATIONS, ID.unique(), { orgId, ...data });
+  return databases.createDocument(DATABASE_ID, COLLECTIONS.LOCATIONS, ID.unique(), { orgId, ...data }, userPerms());
 }
 
 export async function deleteLocation(locationId: string) {
@@ -78,7 +88,7 @@ export async function createEmployee(orgId: string, data: {
 }) {
   return databases.createDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, ID.unique(), {
     orgId, ...data, isActive: true,
-  });
+  }, userPerms());
 }
 
 export async function updateEmployee(employeeId: string, data: Record<string, unknown>) {
@@ -86,7 +96,7 @@ export async function updateEmployee(employeeId: string, data: Record<string, un
 }
 
 export async function deleteEmployee(employeeId: string) {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, employeeId, { isActive: false });
+  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, employeeId);
 }
 
 // ── Schedules ─────────────────────────────────────────────────────────────────
@@ -103,7 +113,7 @@ export async function getSchedules(orgId: string) {
 export async function createSchedule(orgId: string, weekStart: string, weekEnd: string) {
   return databases.createDocument(DATABASE_ID, COLLECTIONS.SCHEDULES, ID.unique(), {
     orgId, weekStart, weekEnd, status: 'draft',
-  });
+  }, userPerms());
 }
 
 export async function updateScheduleStatus(scheduleId: string, status: 'draft' | 'review' | 'published') {
@@ -128,7 +138,7 @@ export async function createShift(data: {
   shiftType: string; status: string; isOpen: boolean;
   minStaff: number; maxStaff?: number; color?: string; notes?: string;
 }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.SHIFTS, ID.unique(), data);
+  return databases.createDocument(DATABASE_ID, COLLECTIONS.SHIFTS, ID.unique(), data, userPerms());
 }
 
 export async function updateShift(shiftId: string, data: Record<string, unknown>) {
@@ -151,7 +161,7 @@ export async function getAssignments(shiftId: string) {
 export async function assignEmployee(shiftId: string, employeeId: string, employeeName: string) {
   return databases.createDocument(DATABASE_ID, COLLECTIONS.SHIFT_ASSIGNMENTS, ID.unique(), {
     shiftId, employeeId, employeeName, status: 'confirmed',
-  });
+  }, userPerms());
 }
 
 export async function removeAssignment(assignmentId: string) {
@@ -175,7 +185,7 @@ export async function createTimeOffRequest(data: {
 }) {
   return databases.createDocument(DATABASE_ID, COLLECTIONS.TIME_OFF_REQUESTS, ID.unique(), {
     ...data, status: 'pending',
-  });
+  }, userPerms());
 }
 
 export async function updateTimeOffStatus(requestId: string, status: 'approved' | 'denied') {

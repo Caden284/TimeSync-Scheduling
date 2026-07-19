@@ -1,7 +1,16 @@
 'use client';
 
 import { account, databases, DATABASE_ID, COLLECTIONS, ID, Query } from './appwrite';
+import { Permission, Role } from 'appwrite';
 import type { Models } from 'appwrite';
+
+function userPerms() {
+  return [
+    Permission.read(Role.users()),
+    Permission.update(Role.users()),
+    Permission.delete(Role.users()),
+  ];
+}
 
 export type UserRole = 'admin' | 'staff';
 
@@ -67,7 +76,7 @@ export async function linkProfileToOrg(orgId: string) {
     firstName: name[0] ?? '',
     lastName: name.slice(1).join(' ') ?? '',
     email: session.email,
-  });
+  }, userPerms());
 }
 
 // Invite a staff or admin user (called while admin is already signed in)
@@ -82,6 +91,6 @@ export async function inviteUser(email: string, password: string, firstName: str
     lastName,
     email,
     employeeId: employeeId ?? null,
-  });
+  }, userPerms());
   return user;
 }
