@@ -144,7 +144,7 @@ export default function SchedulePage() {
   const { view, currentDate } = useCalendarStore();
   const { profile } = useAuth();
 
-  const [shifts, setShifts]           = useState<Shift[]>(mockShifts);
+  const { cachedShifts, cachedWeekKey, setCachedShifts, addCachedShift, updateCachedShift, removeCachedShift } = useAppStore();
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
   const [modalMode, setModalMode]     = useState<'edit' | 'delete' | null>(null);
   const [showNewShift, setShowNewShift] = useState(false);
@@ -152,22 +152,23 @@ export default function SchedulePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [schedule, setSchedule]       = useState(mockSchedule);
 
-  // Load real shifts from Appwrite when week changes
+  const parsedDate = parseISO(currentDate + 'T00:00:00');
+  const wStart = startOfWeek(parsedDate, { weekStartsOn: 0 });
+  const wEnd   = endOfWeek(parsedDate,   { weekStartsOn: 0 });
+  const weekKey = `${profile?.orgId ?? 'local'}-${format(wStart, 'yyyy-MM-dd')}`;
+
+  // Only fetch from Appwrite when the week/org actually changes (not on every re-mount)
   useEffect(() => {
     if (!profile?.orgId) return;
-    const parsedD = parseISO(currentDate + 'T00:00:00');
-    const ws = startOfWeek(parsedD, { weekStartsOn: 0 });
-    const we = endOfWeek(parsedD, { weekStartsOn: 0 });
-    getShifts(profile.orgId, format(ws, 'yyyy-MM-dd'), format(we, 'yyyy-MM-dd'))
+    if (cachedWeekKey === weekKey) return; // already loaded this week — skip re-fetch
+    getShifts(profile.orgId, format(wStart, 'yyyy-MM-dd'), format(wEnd, 'yyyy-MM-dd'))
       .then(docs => {
-        if (docs.length > 0) {
-          setShifts(docs.map(docToShift));
-        } else {
-          setShifts(mockShifts);
-        }
+        setCachedShifts(weekKey, docs.length > 0 ? docs.map(docToShift) : mockShifts);
       })
-      .catch(() => setShifts(mockShifts));
-  }, [profile?.orgId, currentDate]);
+      .catch(() => setCachedShifts(weekKey, mockShifts));
+  }, [profile?.orgId, weekKey]);
+
+  const shifts = cachedWeekKey === weekKey ? cachedShifts : mockShifts;
 
   useEffect(() => {
     const setup = loadSetup();
@@ -184,9 +185,6 @@ export default function SchedulePage() {
   }, []);
 
   // Week label for header / export
-  const parsedDate = parseISO(currentDate + 'T00:00:00');
-  const wStart = startOfWeek(parsedDate, { weekStartsOn: 0 });
-  const wEnd   = endOfWeek(parsedDate,   { weekStartsOn: 0 });
   const weekLabel = `${format(wStart, 'MMM d')} – ${format(wEnd, 'MMM d, yyyy')}`;
   const orgName = loadSetup()?.org.name ?? 'TimeSync';
 
@@ -218,7 +216,7 @@ export default function SchedulePage() {
       metadata: {},
       createdAt: new Date().toISOString(),
     };
-    setShifts(prev => [...prev, newShift]);
+    addCachedShift(newShift);
     // Persist to Appwrite if authenticated
     if (profile?.orgId) {
       try {
@@ -241,8 +239,7 @@ export default function SchedulePage() {
           color: partial.color,
           notes: partial.notes,
         });
-        // Update ID to the real Appwrite ID
-        setShifts(prev => prev.map(s => s.id === newShift.id ? { ...s, id: doc.$id } : s));
+        updateCachedShift(newShift.id, { id: doc.$id });
       } catch (e) {
         console.error('Failed to save shift to Appwrite:', e);
       }
@@ -250,7 +247,7 @@ export default function SchedulePage() {
   }
 
   async function handleSaveShift(updated: Partial<Shift>) {
-    setShifts(prev => prev.map(s => s.id === selectedShift?.id ? { ...s, ...updated } : s));
+    if (selectedShift?.id) updateCachedShift(selectedShift.id, updated);
     setSelectedShift(prev => prev ? { ...prev, ...updated } : null);
     setModalMode(null);
     if (selectedShift?.id && profile?.orgId) {
@@ -271,7 +268,7 @@ export default function SchedulePage() {
   }
 
   async function handleDeleteShift(shiftId: string) {
-    setShifts(prev => prev.filter(s => s.id !== shiftId));
+    removeCachedShift(shiftId);
     setSelectedShift(null);
     setModalMode(null);
     if (profile?.orgId) {

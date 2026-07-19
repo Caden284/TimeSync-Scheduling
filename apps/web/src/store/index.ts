@@ -123,6 +123,13 @@ interface AppStore {
   setCommandPaletteOpen: (open: boolean) => void;
   copilotOpen: boolean;
   toggleCopilot: () => void;
+  // Shifts cached across route changes so deletions survive navigation
+  cachedShifts: Shift[];
+  cachedWeekKey: string | null;
+  setCachedShifts: (weekKey: string, shifts: Shift[]) => void;
+  addCachedShift: (shift: Shift) => void;
+  updateCachedShift: (id: UUID, patch: Partial<Shift>) => void;
+  removeCachedShift: (id: UUID) => void;
 }
 
 export const useAppStore = create<AppStore>()(
@@ -140,6 +147,15 @@ export const useAppStore = create<AppStore>()(
       setCommandPaletteOpen: (open) => set((s) => { s.commandPaletteOpen = open; }),
       copilotOpen: false,
       toggleCopilot: () => set((s) => { s.copilotOpen = !s.copilotOpen; }),
+      cachedShifts: [],
+      cachedWeekKey: null,
+      setCachedShifts: (weekKey, shifts) => set((s) => { s.cachedWeekKey = weekKey; s.cachedShifts = shifts; }),
+      addCachedShift: (shift) => set((s) => { s.cachedShifts.push(shift); }),
+      updateCachedShift: (id, patch) => set((s) => {
+        const idx = s.cachedShifts.findIndex(sh => sh.id === id);
+        if (idx >= 0) Object.assign(s.cachedShifts[idx], patch);
+      }),
+      removeCachedShift: (id) => set((s) => { s.cachedShifts = s.cachedShifts.filter(sh => sh.id !== id); }),
     })),
     { name: 'AppStore' }
   )
