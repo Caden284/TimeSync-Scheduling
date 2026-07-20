@@ -24,7 +24,7 @@ const STATUS_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'default'>
 const EMPLOYMENT_TYPES = ['all', 'full_time', 'part_time', 'contract', 'per_diem'];
 
 export default function EmployeesPage() {
-  const { setOrg, copilotOpen } = useAppStore();
+  const { setOrg, copilotOpen, addToast } = useAppStore();
   const { profile } = useAuth();
   const [employees, setEmployees] = useState<any[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
@@ -40,7 +40,7 @@ export default function EmployeesPage() {
     if (profile?.orgId) {
       getEmployees(profile.orgId)
         .then(docs => setEmployees(docs.map(d => ({ ...d, id: d.$id }))))
-        .catch(() => {})
+        .catch(() => addToast({ type: 'error', title: 'Failed to load employees' }))
         .finally(() => setLoadingEmployees(false));
     } else {
       setLoadingEmployees(false);
@@ -227,12 +227,23 @@ export default function EmployeesPage() {
 
       {showAddModal && (
         <AddEmployeeModal onClose={() => setShowAddModal(false)}
-          onSaved={emp => setEmployees(prev => [...prev, emp])} />
+          onSaved={emp => {
+            setEmployees(prev => [...prev, emp]);
+            addToast({ type: 'success', title: 'Employee added', message: `${emp.firstName} ${emp.lastName} has been added.` });
+          }} />
       )}
       {showEditModal && selectedEmp && (
         <EditEmployeeModal employee={selectedEmp} onClose={() => setShowEditModal(false)}
-          onSaved={updated => setEmployees(prev => prev.map(e => (e.id ?? e.$id) === (updated.id ?? updated.$id) ? updated : e))}
-          onDeleted={id => { setEmployees(prev => prev.filter(e => (e.id ?? e.$id) !== id)); setSelectedEmp(null); }} />
+          onSaved={updated => {
+            setEmployees(prev => prev.map(e => (e.id ?? e.$id) === (updated.id ?? updated.$id) ? updated : e));
+            setSelectedEmp(updated);
+            addToast({ type: 'success', title: 'Employee updated' });
+          }}
+          onDeleted={id => {
+            setEmployees(prev => prev.filter(e => (e.id ?? e.$id) !== id));
+            setSelectedEmp(null);
+            addToast({ type: 'success', title: 'Employee removed' });
+          }} />
       )}
     </div>
     </AuthGuard>

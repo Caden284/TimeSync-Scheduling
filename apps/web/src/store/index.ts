@@ -110,6 +110,14 @@ export const useCalendarStore = create<CalendarStore>()(
 // APP STORE (global UI state)
 // ============================================================
 
+// ── Toast types ───────────────────────────────────────────────────────────────
+export interface Toast {
+  id: string;
+  type: 'success' | 'error' | 'info' | 'warning';
+  title: string;
+  message?: string;
+}
+
 interface AppStore {
   org: Organization | null;
   setOrg: (org: Organization) => void;
@@ -123,6 +131,10 @@ interface AppStore {
   setCommandPaletteOpen: (open: boolean) => void;
   copilotOpen: boolean;
   toggleCopilot: () => void;
+  // Toast notifications
+  toasts: Toast[];
+  addToast: (toast: Omit<Toast, 'id'>) => void;
+  removeToast: (id: string) => void;
   // Shifts cached across route changes so deletions survive navigation
   cachedShifts: Shift[];
   cachedWeekKey: string | null;
@@ -147,6 +159,12 @@ export const useAppStore = create<AppStore>()(
       setCommandPaletteOpen: (open) => set((s) => { s.commandPaletteOpen = open; }),
       copilotOpen: false,
       toggleCopilot: () => set((s) => { s.copilotOpen = !s.copilotOpen; }),
+      toasts: [],
+      addToast: (toast) => set((s) => {
+        const id = `toast-${Date.now()}-${Math.random()}`;
+        s.toasts.push({ ...toast, id });
+      }),
+      removeToast: (id) => set((s) => { s.toasts = s.toasts.filter(t => t.id !== id); }),
       cachedShifts: [],
       cachedWeekKey: null,
       setCachedShifts: (weekKey, shifts) => set((s) => { s.cachedWeekKey = weekKey; s.cachedShifts = shifts; }),

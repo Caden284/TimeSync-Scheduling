@@ -11,7 +11,7 @@ import { NewShiftModal } from '@/components/calendar/new-shift-modal';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { useAppStore, useCalendarStore } from '@/store';
-import { mockShifts, mockSchedule } from '@/lib/mock-data';
+import { mockSchedule } from '@/lib/mock-data';
 import { loadSetup } from '@/lib/org-store';
 import { useAuth } from '@/context/auth-context';
 import { getShifts, createShift, updateShift, deleteShift } from '@/lib/db';
@@ -140,7 +140,7 @@ function docToShift(doc: any): Shift {
 // ── Page component ───────────────────────────────────────────────────────────
 
 export default function SchedulePage() {
-  const { setOrg, copilotOpen, setActiveSchedule } = useAppStore();
+  const { setOrg, copilotOpen, setActiveSchedule, addToast } = useAppStore();
   const { view, currentDate } = useCalendarStore();
   const { profile } = useAuth();
 
@@ -160,15 +160,16 @@ export default function SchedulePage() {
   // Only fetch from Appwrite when the week/org actually changes (not on every re-mount)
   useEffect(() => {
     if (!profile?.orgId) return;
-    if (cachedWeekKey === weekKey) return; // already loaded this week — skip re-fetch
+    if (cachedWeekKey === weekKey) return;
     getShifts(profile.orgId, format(wStart, 'yyyy-MM-dd'), format(wEnd, 'yyyy-MM-dd'))
-      .then(docs => {
-        setCachedShifts(weekKey, docs.length > 0 ? docs.map(docToShift) : mockShifts);
-      })
-      .catch(() => setCachedShifts(weekKey, mockShifts));
+      .then(docs => setCachedShifts(weekKey, docs.map(docToShift)))
+      .catch(() => {
+        setCachedShifts(weekKey, []);
+        addToast({ type: 'error', title: 'Failed to load shifts', message: 'Check your connection and try refreshing.' });
+      });
   }, [profile?.orgId, weekKey]);
 
-  const shifts = cachedWeekKey === weekKey ? cachedShifts : mockShifts;
+  const shifts = cachedWeekKey === weekKey ? cachedShifts : [];
 
   useEffect(() => {
     const setup = loadSetup();
@@ -240,8 +241,10 @@ export default function SchedulePage() {
           notes: partial.notes,
         });
         updateCachedShift(newShift.id, { id: doc.$id });
-      } catch (e) {
-        console.error('Failed to save shift to Appwrite:', e);
+        addToast({ type: 'success', title: 'Shift created' });
+      } catch (e: any) {
+        removeCachedShift(newShift.id);
+        addToast({ type: 'error', title: 'Failed to create shift', message: e?.message });
       }
     }
   }
@@ -261,8 +264,9 @@ export default function SchedulePage() {
           notes: updated.notes,
           status: updated.status,
         });
-      } catch (e) {
-        console.error('Failed to update shift in Appwrite:', e);
+        addToast({ type: 'success', title: 'Shift updated' });
+      } catch (e: any) {
+        addToast({ type: 'error', title: 'Failed to update shift', message: e?.message });
       }
     }
   }
@@ -272,7 +276,12 @@ export default function SchedulePage() {
     setSelectedShift(null);
     setModalMode(null);
     if (profile?.orgId) {
-      try { await deleteShift(shiftId); } catch (e) { console.error('Failed to delete shift:', e); }
+      try {
+        await deleteShift(shiftId);
+        addToast({ type: 'success', title: 'Shift deleted' });
+      } catch (e: any) {
+        addToast({ type: 'error', title: 'Failed to delete shift', message: e?.message });
+      }
     }
   }
 
