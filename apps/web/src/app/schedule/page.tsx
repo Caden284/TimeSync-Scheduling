@@ -5,6 +5,9 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { CalendarToolbar } from '@/components/calendar/calendar-toolbar';
 import { WeekView } from '@/components/calendar/week-view';
+import { DayView } from '@/components/calendar/day-view';
+import { MonthView } from '@/components/calendar/month-view';
+import { TimelineView } from '@/components/calendar/timeline-view';
 import { ShiftDetailPanel } from '@/components/calendar/shift-detail-panel';
 import { EditShiftModal } from '@/components/calendar/edit-shift-modal';
 import { NewShiftModal } from '@/components/calendar/new-shift-modal';
@@ -338,16 +341,33 @@ export default function SchedulePage() {
               onPublish={handlePublish}
             />
             <div className="flex-1 overflow-hidden">
-              {view === 'week' || view === 'department' || view === 'timeline' ? (
+              {(view === 'week' || view === 'department' || view === 'role' || view === 'location') && (
                 <WeekView
                   shifts={shifts}
                   onShiftClick={handleShiftClick}
                   onCreateShift={handleCreateShift}
                 />
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  <p className="text-sm">{view.charAt(0).toUpperCase() + view.slice(1)} view — coming soon</p>
-                </div>
+              )}
+              {view === 'day' && (
+                <DayView
+                  shifts={shifts}
+                  onShiftClick={handleShiftClick}
+                  onCreateShift={handleCreateShift}
+                />
+              )}
+              {view === 'month' && (
+                <MonthView
+                  shifts={shifts}
+                  onShiftClick={handleShiftClick}
+                  onCreateShift={handleCreateShift}
+                />
+              )}
+              {view === 'timeline' && (
+                <TimelineView
+                  shifts={shifts}
+                  onShiftClick={handleShiftClick}
+                  onCreateShift={handleCreateShift}
+                />
               )}
             </div>
           </div>
