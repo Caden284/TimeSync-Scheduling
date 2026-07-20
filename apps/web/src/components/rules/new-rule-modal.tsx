@@ -32,14 +32,19 @@ export function NewRuleModal({ onClose, onSaved }: Props) {
   function handleSave() {
     if (!form.name) return;
     onSaved({
-      id: `rule-${Date.now()}`,
+      id: `rule-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      orgId: 'local',
       name: form.name,
       ruleType: form.ruleType,
       constraintType: form.constraintType,
-      description: form.description,
+      description: form.description || `${form.name} scheduling rule`,
       priority: parseInt(form.priority),
       isEnabled: true,
+      isSystem: false,
+      weight: form.constraintType === 'soft' ? 0.7 : undefined,
+      conditions: [],
       parameters: form.value ? { value: form.value } : {},
+      createdAt: new Date().toISOString(),
     });
     onClose();
   }

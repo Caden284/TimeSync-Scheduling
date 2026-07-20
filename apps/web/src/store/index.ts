@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { devtools } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type {
   CalendarState, CalendarView, CalendarFilters,
   Employee, Schedule, Shift, SchedulingRule,
@@ -234,5 +234,53 @@ export const useCopilotStore = create<CopilotStore>()(
       setStreaming: (streaming) => set((s) => { s.isStreaming = streaming; }),
     })),
     { name: 'CopilotStore' }
+  )
+);
+
+// ============================================================
+// RULES STORE (persisted to localStorage per org)
+// ============================================================
+
+interface RulesStore {
+  orgId: string | null;
+  rules: SchedulingRule[];
+  setOrgRules: (orgId: string, rules: SchedulingRule[]) => void;
+  addRule: (rule: SchedulingRule) => void;
+  toggleRule: (id: UUID) => void;
+  updateRule: (id: UUID, patch: Partial<SchedulingRule>) => void;
+  deleteRule: (id: UUID) => void;
+}
+
+export const useRulesStore = create<RulesStore>()(
+  devtools(
+    persist(
+      immer((set) => ({
+        orgId: null,
+        rules: [],
+
+        setOrgRules: (orgId, rules) => set((s) => {
+          s.orgId = orgId;
+          s.rules = rules;
+        }),
+
+        addRule: (rule) => set((s) => { s.rules.push(rule); }),
+
+        toggleRule: (id) => set((s) => {
+          const r = s.rules.find(r => r.id === id);
+          if (r) r.isEnabled = !r.isEnabled;
+        }),
+
+        updateRule: (id, patch) => set((s) => {
+          const r = s.rules.find(r => r.id === id);
+          if (r) Object.assign(r, patch);
+        }),
+
+        deleteRule: (id) => set((s) => {
+          s.rules = s.rules.filter(r => r.id !== id);
+        }),
+      })),
+      { name: 'timesync-rules' }
+    ),
+    { name: 'RulesStore' }
   )
 );

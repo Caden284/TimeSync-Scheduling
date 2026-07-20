@@ -5,10 +5,11 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useAppStore } from '@/store';
-import { mockOrg, mockRules } from '@/lib/mock-data';
+import { useAppStore, useRulesStore } from '@/store';
+import { mockRules } from '@/lib/mock-data';
+import { useAuth } from '@/context/auth-context';
 import { cn } from '@/lib/utils';
-import { Plus, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, Zap, X, ChevronRight } from 'lucide-react';
+import { Plus, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, Zap, Trash2, ChevronRight, Info } from 'lucide-react';
 import type { SchedulingRule } from '@/types';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { AuthGuard } from '@/components/auth/auth-guard';
@@ -25,23 +26,30 @@ const RULE_TYPE_ICONS: Record<string, string> = {
 };
 
 export default function RulesPage() {
-  const { setOrg, copilotOpen } = useAppStore();
-  const [rules, setRules] = useState(mockRules);
+  const { copilotOpen } = useAppStore();
+  const { profile } = useAuth();
+  const { rules, orgId, setOrgRules, toggleRule: storeToggle, deleteRule: storeDelete, addRule } = useRulesStore();
   const [selected, setSelected] = useState<SchedulingRule | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
 
-  useEffect(() => { setOrg(mockOrg); }, []);
+  // Seed default rules when org first loads (only if no rules for this org yet)
+  useEffect(() => {
+    if (profile?.orgId && orgId !== profile.orgId) {
+      setOrgRules(profile.orgId, mockRules.map(r => ({ ...r, orgId: profile.orgId })));
+    }
+  }, [profile?.orgId]);
 
   function toggleRule(id: string) {
-    setRules((prev) => prev.map((r) => r.id === id ? { ...r, isEnabled: !r.isEnabled } : r));
+    storeToggle(id);
+    setSelected(prev => prev?.id === id ? { ...prev, isEnabled: !prev.isEnabled } : prev);
   }
   function deleteRule(id: string) {
-    setRules(prev => prev.filter(r => r.id !== id));
+    storeDelete(id);
     if (selected?.id === id) setSelected(null);
   }
 
-  const hardRules = rules.filter((r) => r.constraintType === 'hard');
-  const softRules = rules.filter((r) => r.constraintType === 'soft');
+  const hardRules = rules.filter(r => r.constraintType === 'hard');
+  const softRules = rules.filter(r => r.constraintType === 'soft');
 
   return (
     <AuthGuard>
@@ -50,7 +58,7 @@ export default function RulesPage() {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar
           title="Rule Engine"
-          subtitle={`${rules.filter((r) => r.isEnabled).length} active rules · ${hardRules.length} hard, ${softRules.length} soft`}
+          subtitle={`${rules.filter(r => r.isEnabled).length} active rules · ${rules.filter(r=>r.constraintType==='hard').length} hard, ${rules.filter(r=>r.constraintType==='soft').length} soft`}
           actions={
             <Button variant="primary" size="sm" leftIcon={<Plus size={13} />} className="text-xs"
               onClick={() => setShowNewModal(true)}>
@@ -174,7 +182,7 @@ export default function RulesPage() {
 
       {showNewModal && (
         <NewRuleModal onClose={() => setShowNewModal(false)}
-          onSaved={rule => setRules(prev => [...prev, rule as any])} />
+          onSaved={rule => addRule(rule as SchedulingRule)} />
       )}
     </div>
     </AuthGuard>
