@@ -29,12 +29,14 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
       const dept = setup?.departments.find(d => d.id === form.departmentId);
       const doc = await createEmployee(orgId, {
         firstName: form.firstName, lastName: form.lastName, email: form.email,
+        phone: form.phone,
         role: form.role, departmentId: form.departmentId,
         employmentType: form.employmentType,
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,
       });
       onSaved({
         id: doc.$id, firstName: form.firstName, lastName: form.lastName, email: form.email,
+        phone: form.phone,
         role: form.role, departmentId: form.departmentId,
         departmentName: dept?.name ?? '', employmentType: form.employmentType,
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,

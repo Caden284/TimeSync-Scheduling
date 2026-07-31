@@ -83,7 +83,7 @@ export async function getEmployees(orgId: string) {
 }
 
 export async function createEmployee(orgId: string, data: {
-  firstName: string; lastName: string; email: string;
+  firstName: string; lastName: string; email: string; phone?: string;
   role: string; departmentId?: string; employmentType: string; payRate?: number;
 }) {
   return databases.createDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, ID.unique(), {
