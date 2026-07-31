@@ -253,34 +253,31 @@ interface RulesStore {
 
 export const useRulesStore = create<RulesStore>()(
   devtools(
-    persist(
-      immer((set) => ({
-        orgId: null,
-        rules: [],
+    immer((set) => ({
+      orgId: null,
+      rules: [],
 
-        setOrgRules: (orgId, rules) => set((s) => {
-          s.orgId = orgId;
-          s.rules = rules;
-        }),
+      setOrgRules: (orgId, rules) => set((s) => {
+        s.orgId = orgId;
+        s.rules = rules as any;
+      }),
 
-        addRule: (rule) => set((s) => { s.rules.push(rule); }),
+      addRule: (rule) => set((s) => { s.rules.push(rule as any); }),
 
-        toggleRule: (id) => set((s) => {
-          const r = s.rules.find(r => r.id === id);
-          if (r) r.isEnabled = !r.isEnabled;
-        }),
+      toggleRule: (id) => set((s) => {
+        const r = s.rules.find(r => r.id === id);
+        if (r) r.isEnabled = !r.isEnabled;
+      }),
 
-        updateRule: (id, patch) => set((s) => {
-          const r = s.rules.find(r => r.id === id);
-          if (r) Object.assign(r, patch);
-        }),
+      updateRule: (id, patch) => set((s) => {
+        const r = s.rules.find(r => r.id === id);
+        if (r) Object.assign(r, patch);
+      }),
 
-        deleteRule: (id) => set((s) => {
-          s.rules = s.rules.filter(r => r.id !== id);
-        }),
-      })),
-      { name: 'timesync-rules' }
-    ),
+      deleteRule: (id) => set((s) => {
+        s.rules = s.rules.filter(r => r.id !== id);
+      }),
+    })),
     { name: 'RulesStore' }
   )
 );

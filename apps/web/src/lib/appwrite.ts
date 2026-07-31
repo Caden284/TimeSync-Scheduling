@@ -15,6 +15,7 @@ export const COLLECTIONS = {
   TIME_OFF_REQUESTS:  'time_off_requests',
   SCHEDULES:          'schedules',
   USER_PROFILES:      'user_profiles',
+  SCHEDULING_RULES:   'scheduling_rules',
 } as const;
 
 // Client-side Appwrite client (uses browser session)

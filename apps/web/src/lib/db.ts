@@ -191,3 +191,84 @@ export async function createTimeOffRequest(data: {
 export async function updateTimeOffStatus(requestId: string, status: 'approved' | 'denied') {
   return databases.updateDocument(DATABASE_ID, COLLECTIONS.TIME_OFF_REQUESTS, requestId, { status });
 }
+
+// ── Scheduling Rules ──────────────────────────────────────────────────────────
+
+export async function getRules(orgId: string) {
+  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, [
+    Query.equal('orgId', orgId),
+    Query.orderAsc('priority'),
+    Query.limit(200),
+  ]);
+  return res.documents.map(docToRule);
+}
+
+export async function createRule(orgId: string, data: {
+  name: string; ruleType: string; constraintType: string;
+  description?: string; isEnabled?: boolean; isSystem?: boolean;
+  priority: number; weight?: number; parameters?: Record<string, unknown>;
+  scopeDepts?: string[]; scopeLocations?: string[]; scopeRoles?: string[];
+}) {
+  const doc = await databases.createDocument(
+    DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ID.unique(),
+    {
+      orgId,
+      name: data.name,
+      ruleType: data.ruleType,
+      constraintType: data.constraintType,
+      description: data.description ?? '',
+      isEnabled: data.isEnabled ?? true,
+      isSystem: data.isSystem ?? false,
+      priority: data.priority,
+      weight: data.weight ?? null,
+      parameters: data.parameters ? JSON.stringify(data.parameters) : '{}',
+      scopeDepts: data.scopeDepts ?? [],
+      scopeLocations: data.scopeLocations ?? [],
+      scopeRoles: data.scopeRoles ?? [],
+    },
+    userPerms()
+  );
+  return docToRule(doc);
+}
+
+export async function updateRule(ruleId: string, patch: {
+  name?: string; description?: string; isEnabled?: boolean;
+  priority?: number; weight?: number; parameters?: Record<string, unknown>;
+}) {
+  const data: Record<string, unknown> = { ...patch };
+  if (patch.parameters !== undefined) {
+    data.parameters = JSON.stringify(patch.parameters);
+    delete data.parameters; // re-add as string
+    data.parameters = JSON.stringify(patch.parameters);
+  }
+  return databases.updateDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId, data);
+}
+
+export async function toggleRule(ruleId: string, isEnabled: boolean) {
+  return databases.updateDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId, { isEnabled });
+}
+
+export async function deleteRule(ruleId: string) {
+  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId);
+}
+
+function docToRule(doc: any) {
+  return {
+    id: doc.$id,
+    orgId: doc.orgId,
+    name: doc.name,
+    ruleType: doc.ruleType,
+    constraintType: doc.constraintType as 'hard' | 'soft',
+    description: doc.description ?? '',
+    isEnabled: doc.isEnabled ?? true,
+    isSystem: doc.isSystem ?? false,
+    priority: doc.priority ?? 50,
+    weight: doc.weight ?? undefined,
+    parameters: (() => { try { return JSON.parse(doc.parameters ?? '{}'); } catch { return {}; } })(),
+    conditions: [],
+    scopeDepts: doc.scopeDepts ?? [],
+    scopeLocations: doc.scopeLocations ?? [],
+    scopeRoles: doc.scopeRoles ?? [],
+    createdAt: doc.$createdAt,
+  };
+}

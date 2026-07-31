@@ -73,6 +73,7 @@ async function createCollections() {
     { id: 'shift_assignments',  name: 'Shift Assignments' },
     { id: 'time_off_requests',  name: 'Time Off Requests' },
     { id: 'user_profiles',      name: 'User Profiles' },
+    { id: 'scheduling_rules',   name: 'Scheduling Rules' },
   ];
 
   for (const col of collections) {
@@ -196,6 +197,24 @@ async function createAttributes() {
   ];
   for (const fn of torAttrs) { await safeCreate(fn, 'time_off_requests attr'); await sleep(200); }
 
+  // scheduling_rules
+  const ruleAttrs = [
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'orgId', 36, true),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'name', 255, true),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'ruleType', 60, true),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'constraintType', 10, true),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'description', 500, false),
+    () => db.createBooleanAttribute(DATABASE_ID, 'scheduling_rules', 'isEnabled', false, true),
+    () => db.createBooleanAttribute(DATABASE_ID, 'scheduling_rules', 'isSystem', false, false),
+    () => db.createIntegerAttribute(DATABASE_ID, 'scheduling_rules', 'priority', false, 50, 1, 200),
+    () => db.createFloatAttribute(DATABASE_ID, 'scheduling_rules', 'weight', false),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'parameters', 2000, false, '{}'),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'scopeDepts', 36, false, undefined, true),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'scopeLocations', 36, false, undefined, true),
+    () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'scopeRoles', 36, false, undefined, true),
+  ];
+  for (const fn of ruleAttrs) { await safeCreate(fn, 'scheduling_rules attr'); await sleep(200); }
+
   // user_profiles
   const upAttrs = [
     () => db.createStringAttribute(DATABASE_ID, 'user_profiles', 'userId', 36, true),
@@ -221,8 +240,10 @@ async function createIndexes() {
     ['shifts',            'idx_shift_date',  ['date']],
     ['time_off_requests', 'idx_tor_org',     ['orgId']],
     ['time_off_requests', 'idx_tor_status',  ['status']],
-    ['user_profiles',     'idx_up_userId',   ['userId']],
-    ['schedules',         'idx_sched_org',   ['orgId']],
+    ['user_profiles',       'idx_up_userId',    ['userId']],
+    ['schedules',           'idx_sched_org',    ['orgId']],
+    ['scheduling_rules',    'idx_rules_org',    ['orgId']],
+    ['scheduling_rules',    'idx_rules_type',   ['constraintType']],
   ];
 
   for (const [col, key, attrs] of indexes) {

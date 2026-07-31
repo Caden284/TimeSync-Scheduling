@@ -8,8 +8,9 @@ import { Button } from '@/components/ui/button';
 import { useAppStore, useRulesStore } from '@/store';
 import { mockRules } from '@/lib/mock-data';
 import { useAuth } from '@/context/auth-context';
+import { getRules, createRule, toggleRule as dbToggleRule, deleteRule as dbDeleteRule } from '@/lib/db';
 import { cn } from '@/lib/utils';
-import { Plus, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, Zap, Trash2, ChevronRight, Info } from 'lucide-react';
+import { Plus, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, Zap, ChevronRight, Loader2 } from 'lucide-react';
 import type { SchedulingRule } from '@/types';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { AuthGuard } from '@/components/auth/auth-guard';
@@ -25,27 +26,98 @@ const RULE_TYPE_ICONS: Record<string, string> = {
   SENIORITY_ORDER: '🏆', SKILL_MATCH_QUALITY: '🎯',
 };
 
+// Default system rules seeded the first time an org has no rules in Appwrite
+const SYSTEM_DEFAULTS = mockRules.filter(r =>
+  ['MAX_HOURS_WEEK', 'MIN_REST_BETWEEN', 'PREFER_AVAILABILITY', 'BALANCE_WEEKENDS', 'MINIMIZE_OVERTIME'].includes(r.ruleType)
+);
+
 export default function RulesPage() {
-  const { copilotOpen } = useAppStore();
+  const { copilotOpen, addToast } = useAppStore();
   const { profile } = useAuth();
-  const { rules, orgId, setOrgRules, toggleRule: storeToggle, deleteRule: storeDelete, addRule } = useRulesStore();
+  const { rules, setOrgRules, addRule: storeAddRule, toggleRule: storeToggle, deleteRule: storeDelete, updateRule: storeUpdate } = useRulesStore();
   const [selected, setSelected] = useState<SchedulingRule | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
-  // Seed default rules when org first loads (only if no rules for this org yet)
+  // Load rules from Appwrite on mount
   useEffect(() => {
-    if (profile?.orgId && orgId !== profile.orgId) {
-      setOrgRules(profile.orgId, mockRules.map(r => ({ ...r, orgId: profile.orgId })));
-    }
+    if (!profile?.orgId) return;
+    setLoading(true);
+    getRules(profile.orgId)
+      .then(async (fetched) => {
+        if (fetched.length === 0) {
+          // First-time: seed universal defaults into Appwrite
+          const seeded: SchedulingRule[] = [];
+          for (const r of SYSTEM_DEFAULTS) {
+            try {
+              const saved = await createRule(profile.orgId, {
+                name: r.name, ruleType: r.ruleType, constraintType: r.constraintType,
+                description: r.description, isEnabled: r.isEnabled, isSystem: r.isSystem ?? false,
+                priority: r.priority, weight: r.weight,
+                parameters: r.parameters as Record<string, unknown>,
+              });
+              seeded.push(saved as unknown as SchedulingRule);
+            } catch {}
+          }
+          setOrgRules(profile.orgId, seeded);
+        } else {
+          setOrgRules(profile.orgId, fetched as unknown as SchedulingRule[]);
+        }
+      })
+      .catch(() => addToast({ type: 'error', title: 'Failed to load rules' }))
+      .finally(() => setLoading(false));
   }, [profile?.orgId]);
 
-  function toggleRule(id: string) {
+  async function toggleRule(id: string) {
+    const rule = rules.find(r => r.id === id);
+    if (!rule) return;
+    setToggling(id);
+    const newVal = !rule.isEnabled;
     storeToggle(id);
-    setSelected(prev => prev?.id === id ? { ...prev, isEnabled: !prev.isEnabled } : prev);
+    setSelected(prev => prev?.id === id ? { ...prev, isEnabled: newVal } : prev);
+    try {
+      await dbToggleRule(id, newVal);
+    } catch {
+      // Revert on failure
+      storeToggle(id);
+      addToast({ type: 'error', title: 'Failed to update rule' });
+    } finally {
+      setToggling(null);
+    }
   }
-  function deleteRule(id: string) {
+
+  async function deleteRule(id: string) {
+    const rule = rules.find(r => r.id === id);
+    if (!rule || !confirm(`Delete "${rule.name}"? This cannot be undone.`)) return;
+    setDeleting(id);
     storeDelete(id);
     if (selected?.id === id) setSelected(null);
+    try {
+      await dbDeleteRule(id);
+      addToast({ type: 'success', title: 'Rule deleted' });
+    } catch {
+      addToast({ type: 'error', title: 'Failed to delete rule' });
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  async function handleRuleSaved(rule: SchedulingRule) {
+    if (!profile?.orgId) return;
+    try {
+      const saved = await createRule(profile.orgId, {
+        name: rule.name, ruleType: rule.ruleType, constraintType: rule.constraintType,
+        description: rule.description, isEnabled: true, isSystem: false,
+        priority: rule.priority, weight: rule.weight,
+        parameters: rule.parameters as Record<string, unknown>,
+      });
+      storeAddRule(saved as unknown as SchedulingRule);
+      addToast({ type: 'success', title: 'Rule created', message: rule.name });
+    } catch (e: any) {
+      addToast({ type: 'error', title: 'Failed to save rule', message: e?.message });
+    }
   }
 
   const hardRules = rules.filter(r => r.constraintType === 'hard');
@@ -69,20 +141,13 @@ export default function RulesPage() {
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            <div className="p-6 space-y-6">
-
-              {/* Visual Rule Builder CTA */}
-              <div className="rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 p-6 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-white">Visual Rule Builder</h2>
-                  <p className="text-indigo-100 text-sm mt-1">
-                    Build complex scheduling rules with drag-and-drop — no code required.
-                  </p>
-                </div>
-                <Button variant="secondary" size="md" leftIcon={<Zap size={14} />}>
-                  Open Builder
-                </Button>
+            {loading ? (
+              <div className="flex items-center justify-center h-full gap-2 text-gray-400">
+                <Loader2 size={18} className="animate-spin" />
+                <span className="text-sm">Loading rules…</span>
               </div>
+            ) : (
+            <div className="p-6 space-y-6">
 
               {/* Hard Constraints */}
               <RuleGroup
@@ -94,6 +159,7 @@ export default function RulesPage() {
                 selected={selected}
                 onSelect={setSelected}
                 onToggle={toggleRule}
+                toggling={toggling}
               />
 
               {/* Soft Constraints */}
@@ -106,9 +172,11 @@ export default function RulesPage() {
                 selected={selected}
                 onSelect={setSelected}
                 onToggle={toggleRule}
+                toggling={toggling}
               />
 
             </div>
+            )}
           </div>
 
           {/* Rule detail panel */}
@@ -165,11 +233,14 @@ export default function RulesPage() {
 
                 <div className="flex gap-2 pt-2">
                   <Button variant="primary" size="sm" className="flex-1"
+                    loading={toggling === selected.id}
                     onClick={() => toggleRule(selected.id)}>
                     {selected.isEnabled ? 'Disable Rule' : 'Enable Rule'}
                   </Button>
                   {!selected.isSystem && (
-                    <Button variant="danger" size="sm" onClick={() => deleteRule(selected.id)}>Delete</Button>
+                    <Button variant="danger" size="sm"
+                      loading={deleting === selected.id}
+                      onClick={() => deleteRule(selected.id)}>Delete</Button>
                   )}
                 </div>
               </div>
@@ -182,7 +253,7 @@ export default function RulesPage() {
 
       {showNewModal && (
         <NewRuleModal onClose={() => setShowNewModal(false)}
-          onSaved={rule => addRule(rule as SchedulingRule)} />
+          onSaved={rule => handleRuleSaved(rule as SchedulingRule)} />
       )}
     </div>
     </AuthGuard>
@@ -190,7 +261,7 @@ export default function RulesPage() {
 }
 
 function RuleGroup({
-  title, description, icon, badgeVariant, rules, selected, onSelect, onToggle,
+  title, description, icon, badgeVariant, rules, selected, onSelect, onToggle, toggling,
 }: {
   title: string;
   description: string;
@@ -200,6 +271,7 @@ function RuleGroup({
   selected: SchedulingRule | null;
   onSelect: (r: SchedulingRule) => void;
   onToggle: (id: string) => void;
+  toggling: string | null;
 }) {
   return (
     <div>
@@ -250,12 +322,15 @@ function RuleGroup({
               </Badge>
               <button
                 onClick={(e) => { e.stopPropagation(); onToggle(rule.id); }}
+                disabled={toggling === rule.id}
                 className={cn(
                   'transition-colors',
-                  rule.isEnabled ? 'text-indigo-600' : 'text-gray-300'
+                  toggling === rule.id ? 'text-gray-300' : rule.isEnabled ? 'text-indigo-600' : 'text-gray-300'
                 )}
               >
-                {rule.isEnabled ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                {toggling === rule.id
+                  ? <Loader2 size={18} className="animate-spin" />
+                  : rule.isEnabled ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
               </button>
               <ChevronRight size={14} className="text-gray-400" />
             </div>
