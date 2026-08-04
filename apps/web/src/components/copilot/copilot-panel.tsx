@@ -10,13 +10,13 @@ import { format, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import type { CopilotMessage } from '@/types';
 
 const SUGGESTED_PROMPTS = [
-  'Generate next week\'s schedule',
+  'Assign all open shifts this week to available employees',
   'Who is closest to overtime this week?',
   'Find coverage for an open shift',
   'Summarize my active scheduling rules',
-  'What shifts are open this week?',
+  'What shifts are open today?',
   'Help me balance weekend shifts fairly',
-  'Show labor cost breakdown by department',
+  'Show me all unassigned shifts',
   'What employees can work tomorrow?',
 ];
 
@@ -118,6 +118,7 @@ export function CopilotPanel() {
           employees: empContext,
           shifts: shiftContext,
           orgName: org?.name ?? profile?.orgId ?? 'Your Organization',
+          orgId: profile?.orgId,
           currentDate: new Date().toISOString().split('T')[0],
         }),
       });
@@ -142,6 +143,7 @@ export function CopilotPanel() {
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) throw new Error(parsed.error);
+            if (parsed.tool_action) appendStreamChunk(convId, aiMsgId, `\n_${parsed.tool_action}_\n`);
             if (parsed.text) appendStreamChunk(convId, aiMsgId, parsed.text);
           } catch (e: any) {
             if (e.message !== 'Unexpected end of JSON input') throw e;

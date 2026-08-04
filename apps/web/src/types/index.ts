@@ -459,10 +459,70 @@ export interface CopilotConversation {
 }
 
 // ============================================================
+// SEASONS & SHIFT TEMPLATES
+// ============================================================
+
+export type SeasonType =
+  | 'fall' | 'spring' | 'fall_intersession' | 'spring_intersession'
+  | 'summer' | 'summer_intersession';
+
+export interface DayHours {
+  start: string; // HH:mm, empty = closed
+  end: string;
+}
+
+export interface Season {
+  id: UUID;
+  orgId: UUID;
+  name: string;
+  seasonType: SeasonType;
+  startDate: ISODate;
+  endDate: ISODate;
+  isActive: boolean;
+  hours: {
+    sun: DayHours; mon: DayHours; tue: DayHours; wed: DayHours;
+    thu: DayHours; fri: DayHours; sat: DayHours;
+  };
+  createdAt: ISODateTime;
+}
+
+export interface ShiftTemplate {
+  id: UUID;
+  orgId: UUID;
+  seasonId: UUID;
+  name: string;
+  startTime: string; // HH:mm
+  endTime: string;   // HH:mm
+  color: string;
+  departmentId?: UUID;
+  departmentName?: string;
+  minStaff: number;
+  daysOfWeek: number[]; // 0=Sun…6=Sat
+  isActive: boolean;
+  notes?: string;
+  createdAt: ISODateTime;
+}
+
+export interface WeeklyAvailabilityDay {
+  start: string; // HH:mm, empty = unavailable
+  end: string;
+}
+
+export interface WeeklyAvailability {
+  sun: WeeklyAvailabilityDay;
+  mon: WeeklyAvailabilityDay;
+  tue: WeeklyAvailabilityDay;
+  wed: WeeklyAvailabilityDay;
+  thu: WeeklyAvailabilityDay;
+  fri: WeeklyAvailabilityDay;
+  sat: WeeklyAvailabilityDay;
+}
+
+// ============================================================
 // CALENDAR
 // ============================================================
 
-export type CalendarView = 'day' | 'week' | 'month' | 'timeline' | 'department' | 'role' | 'location';
+export type CalendarView = 'day' | 'week' | 'month' | 'timeline' | 'department' | 'role' | 'location' | 'staff_timeline';
 
 export interface CalendarState {
   view: CalendarView;

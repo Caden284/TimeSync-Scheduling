@@ -10,11 +10,12 @@ import { useEffect, useState } from 'react';
 import {
   Calendar, Users, ShieldCheck, BarChart3, MessageSquareMore,
   Settings, ChevronLeft, ChevronRight, Zap, Clock, FileText,
-  Globe, LogOut,
+  Globe, LogOut, Layers,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/schedule',  label: 'Schedule',    icon: Calendar,          section: 'main' },
+  { href: '/seasons',   label: 'Seasons',     icon: Layers,            section: 'main' },
   { href: '/employees', label: 'Employees',   icon: Users,             section: 'main' },
   { href: '/rules',     label: 'Rule Engine', icon: ShieldCheck,       section: 'main' },
   { href: '/analytics', label: 'Analytics',   icon: BarChart3,         section: 'main' },

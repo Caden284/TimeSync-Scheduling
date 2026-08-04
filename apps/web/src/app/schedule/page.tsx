@@ -8,6 +8,7 @@ import { WeekView } from '@/components/calendar/week-view';
 import { DayView } from '@/components/calendar/day-view';
 import { MonthView } from '@/components/calendar/month-view';
 import { TimelineView } from '@/components/calendar/timeline-view';
+import { StaffTimelineView } from '@/components/calendar/staff-timeline-view';
 import { ShiftDetailPanel } from '@/components/calendar/shift-detail-panel';
 import { EditShiftModal } from '@/components/calendar/edit-shift-modal';
 import { NewShiftModal } from '@/components/calendar/new-shift-modal';
@@ -367,6 +368,12 @@ export default function SchedulePage() {
                   shifts={shifts}
                   onShiftClick={handleShiftClick}
                   onCreateShift={handleCreateShift}
+                />
+              )}
+              {view === 'staff_timeline' && (
+                <StaffTimelineView
+                  shifts={shifts}
+                  onShiftClick={handleShiftClick}
                 />
               )}
             </div>

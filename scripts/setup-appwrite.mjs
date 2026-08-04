@@ -73,7 +73,10 @@ async function createCollections() {
     { id: 'shift_assignments',  name: 'Shift Assignments' },
     { id: 'time_off_requests',  name: 'Time Off Requests' },
     { id: 'user_profiles',      name: 'User Profiles' },
-    { id: 'scheduling_rules',   name: 'Scheduling Rules' },
+    { id: 'scheduling_rules',      name: 'Scheduling Rules' },
+    { id: 'seasons',               name: 'Seasons' },
+    { id: 'shift_templates',       name: 'Shift Templates' },
+    { id: 'availability_overrides', name: 'Availability Overrides' },
   ];
 
   for (const col of collections) {
@@ -215,6 +218,55 @@ async function createAttributes() {
   ];
   for (const fn of ruleAttrs) { await safeCreate(fn, 'scheduling_rules attr'); await sleep(200); }
 
+  // seasons
+  const seasonAttrs = [
+    () => db.createStringAttribute(DATABASE_ID, 'seasons', 'orgId', 36, true),
+    () => db.createStringAttribute(DATABASE_ID, 'seasons', 'name', 120, true),
+    () => db.createStringAttribute(DATABASE_ID, 'seasons', 'seasonType', 40, true),
+    () => db.createStringAttribute(DATABASE_ID, 'seasons', 'startDate', 10, true),
+    () => db.createStringAttribute(DATABASE_ID, 'seasons', 'endDate', 10, true),
+    () => db.createBooleanAttribute(DATABASE_ID, 'seasons', 'isActive', false, false),
+    () => db.createStringAttribute(DATABASE_ID, 'seasons', 'hoursJson', 2000, false, '{}'),
+  ];
+  for (const fn of seasonAttrs) { await safeCreate(fn, 'seasons attr'); await sleep(200); }
+
+  // shift_templates
+  const tmplAttrs = [
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'orgId', 36, true),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'seasonId', 36, true),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'name', 120, true),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'startTime', 8, true),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'endTime', 8, true),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'color', 20, false, '#6366f1'),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'departmentId', 36, false),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'departmentName', 80, false),
+    () => db.createIntegerAttribute(DATABASE_ID, 'shift_templates', 'minStaff', false, 1, 500, 1),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'daysOfWeek', 30, false, '[1,2,3,4,5]'),
+    () => db.createBooleanAttribute(DATABASE_ID, 'shift_templates', 'isActive', false, true),
+    () => db.createStringAttribute(DATABASE_ID, 'shift_templates', 'notes', 500, false),
+  ];
+  for (const fn of tmplAttrs) { await safeCreate(fn, 'shift_templates attr'); await sleep(200); }
+
+  // availability_overrides
+  const aoAttrs = [
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'orgId', 36, true),
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'employeeId', 36, true),
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'employeeName', 120, true),
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'date', 10, true),
+    () => db.createBooleanAttribute(DATABASE_ID, 'availability_overrides', 'isAvailable', true),
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'reason', 255, false),
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'altStartTime', 8, false),
+    () => db.createStringAttribute(DATABASE_ID, 'availability_overrides', 'altEndTime', 8, false),
+  ];
+  for (const fn of aoAttrs) { await safeCreate(fn, 'availability_overrides attr'); await sleep(200); }
+
+  // weeklyAvailability on employees (new attribute)
+  await safeCreate(
+    () => db.createStringAttribute(DATABASE_ID, 'employees', 'weeklyAvailability', 2000, false, '{}'),
+    'employees.weeklyAvailability'
+  );
+  await sleep(200);
+
   // user_profiles
   const upAttrs = [
     () => db.createStringAttribute(DATABASE_ID, 'user_profiles', 'userId', 36, true),
@@ -244,6 +296,11 @@ async function createIndexes() {
     ['schedules',           'idx_sched_org',    ['orgId']],
     ['scheduling_rules',    'idx_rules_org',    ['orgId']],
     ['scheduling_rules',    'idx_rules_type',   ['constraintType']],
+    ['seasons',             'idx_seasons_org',  ['orgId']],
+    ['shift_templates',     'idx_tmpl_org',     ['orgId']],
+    ['shift_templates',     'idx_tmpl_season',  ['seasonId']],
+    ['availability_overrides', 'idx_ao_emp',    ['employeeId']],
+    ['availability_overrides', 'idx_ao_date',   ['date']],
   ];
 
   for (const [col, key, attrs] of indexes) {

@@ -33,7 +33,7 @@ function navigateDate(date: ISODate, view: CalendarView, direction: 'prev' | 'ne
   const delta = direction === 'next' ? 1 : -1;
   const steps: Record<CalendarView, number> = {
     day: 1, week: 7, month: 30, timeline: 7,
-    department: 7, role: 7, location: 7,
+    department: 7, role: 7, location: 7, staff_timeline: 1,
   };
   d.setDate(d.getDate() + delta * (steps[view] ?? 7));
   return d.toISOString().split('T')[0];

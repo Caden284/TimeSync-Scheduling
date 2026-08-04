@@ -8,11 +8,12 @@ import type { CalendarView } from '@/types';
 import { format, parseISO, addDays, startOfWeek, endOfWeek } from 'date-fns';
 
 const VIEWS: { id: CalendarView; label: string }[] = [
-  { id: 'day',        label: 'Day' },
-  { id: 'week',       label: 'Week' },
-  { id: 'month',      label: 'Month' },
-  { id: 'timeline',   label: 'Timeline' },
-  { id: 'department', label: 'Dept' },
+  { id: 'day',            label: 'Day' },
+  { id: 'week',           label: 'Week' },
+  { id: 'month',          label: 'Month' },
+  { id: 'timeline',       label: 'Timeline' },
+  { id: 'staff_timeline', label: 'Staff' },
+  { id: 'department',     label: 'Dept' },
 ];
 
 interface CalendarToolbarProps {
@@ -30,9 +31,9 @@ export function CalendarToolbar({ onGenerate, isGenerating, scheduleStatus, onPu
   const weekStart = startOfWeek(parsedDate, { weekStartsOn: 0 });
   const weekEnd = endOfWeek(parsedDate, { weekStartsOn: 0 });
 
-  const rangeLabel = view === 'day'
+  const rangeLabel = (view === 'day' || view === 'staff_timeline')
     ? format(parsedDate, 'MMMM d, yyyy')
-    : view === 'week' || view === 'department' || view === 'timeline'
+    : (view === 'week' || view === 'department' || view === 'timeline')
     ? formatDateRange(format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd'))
     : format(parsedDate, 'MMMM yyyy');
 

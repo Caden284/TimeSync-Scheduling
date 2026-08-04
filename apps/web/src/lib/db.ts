@@ -252,6 +252,98 @@ export async function deleteRule(ruleId: string) {
   return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId);
 }
 
+// ── Seasons ───────────────────────────────────────────────────────────────────
+
+export async function getSeasons(orgId: string) {
+  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SEASONS, [
+    Query.equal('orgId', orgId),
+    Query.orderAsc('startDate'),
+    Query.limit(50),
+  ]);
+  return res.documents.map(docToSeason);
+}
+
+export async function createSeason(orgId: string, data: {
+  name: string; seasonType: string; startDate: string; endDate: string;
+  isActive?: boolean; hoursJson: string;
+}) {
+  const doc = await databases.createDocument(
+    DATABASE_ID, COLLECTIONS.SEASONS, ID.unique(),
+    { orgId, ...data, isActive: data.isActive ?? false },
+    userPerms()
+  );
+  return docToSeason(doc);
+}
+
+export async function updateSeason(seasonId: string, data: Partial<{
+  name: string; seasonType: string; startDate: string; endDate: string;
+  isActive: boolean; hoursJson: string;
+}>) {
+  const doc = await databases.updateDocument(DATABASE_ID, COLLECTIONS.SEASONS, seasonId, data);
+  return docToSeason(doc);
+}
+
+export async function deleteSeason(seasonId: string) {
+  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SEASONS, seasonId);
+}
+
+function docToSeason(doc: any) {
+  let hours = { sun: { start: '', end: '' }, mon: { start: '', end: '' }, tue: { start: '', end: '' }, wed: { start: '', end: '' }, thu: { start: '', end: '' }, fri: { start: '', end: '' }, sat: { start: '', end: '' } };
+  try { if (doc.hoursJson) hours = JSON.parse(doc.hoursJson); } catch {}
+  return { id: doc.$id, orgId: doc.orgId, name: doc.name, seasonType: doc.seasonType, startDate: doc.startDate, endDate: doc.endDate, isActive: doc.isActive ?? false, hours, createdAt: doc.$createdAt };
+}
+
+// ── Shift Templates ───────────────────────────────────────────────────────────
+
+export async function getShiftTemplates(orgId: string, seasonId?: string) {
+  const filters: any[] = [Query.equal('orgId', orgId), Query.limit(200)];
+  if (seasonId) filters.push(Query.equal('seasonId', seasonId));
+  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, filters);
+  return res.documents.map(docToTemplate);
+}
+
+export async function createShiftTemplate(orgId: string, data: {
+  seasonId: string; name: string; startTime: string; endTime: string;
+  color?: string; departmentId?: string; departmentName?: string;
+  minStaff?: number; daysOfWeek: number[]; isActive?: boolean; notes?: string;
+}) {
+  const doc = await databases.createDocument(
+    DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, ID.unique(),
+    { orgId, ...data, minStaff: data.minStaff ?? 1, isActive: data.isActive ?? true, daysOfWeek: JSON.stringify(data.daysOfWeek) },
+    userPerms()
+  );
+  return docToTemplate(doc);
+}
+
+export async function updateShiftTemplate(templateId: string, data: Partial<{
+  name: string; startTime: string; endTime: string; color: string;
+  departmentId: string; departmentName: string; minStaff: number;
+  daysOfWeek: number[]; isActive: boolean; notes: string;
+}>) {
+  const payload: any = { ...data };
+  if (data.daysOfWeek !== undefined) payload.daysOfWeek = JSON.stringify(data.daysOfWeek);
+  const doc = await databases.updateDocument(DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, templateId, payload);
+  return docToTemplate(doc);
+}
+
+export async function deleteShiftTemplate(templateId: string) {
+  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, templateId);
+}
+
+function docToTemplate(doc: any) {
+  let daysOfWeek: number[] = [];
+  try { daysOfWeek = JSON.parse(doc.daysOfWeek ?? '[]'); } catch {}
+  return { id: doc.$id, orgId: doc.orgId, seasonId: doc.seasonId, name: doc.name, startTime: doc.startTime, endTime: doc.endTime, color: doc.color ?? '#6366f1', departmentId: doc.departmentId, departmentName: doc.departmentName, minStaff: doc.minStaff ?? 1, daysOfWeek, isActive: doc.isActive ?? true, notes: doc.notes, createdAt: doc.$createdAt };
+}
+
+// ── Employee Availability ─────────────────────────────────────────────────────
+
+export async function updateEmployeeAvailability(employeeId: string, weeklyAvailability: object) {
+  return databases.updateDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, employeeId, {
+    weeklyAvailability: JSON.stringify(weeklyAvailability),
+  });
+}
+
 function docToRule(doc: any) {
   return {
     id: doc.$id,
