@@ -206,7 +206,7 @@ async function createAttributes() {
     () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'description', 500, false),
     () => db.createBooleanAttribute(DATABASE_ID, 'scheduling_rules', 'isEnabled', false, true),
     () => db.createBooleanAttribute(DATABASE_ID, 'scheduling_rules', 'isSystem', false, false),
-    () => db.createIntegerAttribute(DATABASE_ID, 'scheduling_rules', 'priority', false, 50, 1, 200),
+    () => db.createIntegerAttribute(DATABASE_ID, 'scheduling_rules', 'priority', false, 1, 200, 50),
     () => db.createFloatAttribute(DATABASE_ID, 'scheduling_rules', 'weight', false),
     () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'parameters', 2000, false, '{}'),
     () => db.createStringAttribute(DATABASE_ID, 'scheduling_rules', 'scopeDepts', 36, false, undefined, true),
