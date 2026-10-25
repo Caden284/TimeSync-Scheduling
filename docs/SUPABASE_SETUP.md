@@ -7,14 +7,25 @@ employees, rules — lives in the Supabase dashboard under **Table Editor** and
 
 ## 1. Create the database schema
 
-The whole schema lives in [`supabase/migrations/`](../supabase/migrations). Apply it
-once to a new Supabase project, either way:
+> **Already done for the `TimeSync` project** (ref `mnugebtlenlnkiinsyhn`, us-east-1,
+> organization "Kaizen Koding"). Both migrations below are applied. Repeat this step
+> only for a new project (for example a staging copy).
 
-- **Dashboard:** open **SQL Editor → New query**, paste the contents of
-  `supabase/migrations/20261025000000_init.sql`, and run it.
+The whole schema lives in [`supabase/migrations/`](../supabase/migrations), applied in
+filename order:
+
+| File | What it does |
+|---|---|
+| `20261025022713_init.sql` | 13 tables, helper functions, Row Level Security policies |
+| `20261025022820_harden_helpers.sql` | Moves the RLS helper functions into a `private` schema (out of the public API) and adds three foreign-key indexes |
+
+Apply them to a new project either way:
+
+- **Dashboard:** **SQL Editor → New query**, paste each file in order, and run it.
 - **CLI:** `npx supabase link --project-ref <ref>` then `npx supabase db push`.
 
-This creates 13 tables, the helper functions, and Row Level Security policies.
+The filenames match the versions recorded in the live project, so `db push` against
+`TimeSync` only applies migrations added after these.
 
 ## 2. Configure Auth
 

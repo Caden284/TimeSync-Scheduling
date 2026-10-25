@@ -131,7 +131,7 @@ Works end-to-end with real tool use. Beyond S1 (fixed):
 
 | Before (Appwrite) | After (Supabase) |
 |---|---|
-| 13 collections created by `scripts/setup-appwrite.mjs` | 13 tables in `supabase/migrations/20261025000000_init.sql`, with foreign keys, check constraints, indexes, `updated_at` triggers |
+| 13 collections created by `scripts/setup-appwrite.mjs` | 13 tables in `supabase/migrations/` (`…_init.sql`, `…_harden_helpers.sql`), with foreign keys, check constraints, indexes, `updated_at` triggers |
 | Permissions: any signed-in user, all data | Row Level Security per organization and role |
 | JSON stored as strings (`parameters`, `hoursJson`, `weeklyAvailability`, `daysOfWeek`) | Native `jsonb` / arrays — readable and queryable in the dashboard |
 | Browser-side user creation | Server route `/api/admin/users` (admin-checked) |
@@ -145,10 +145,11 @@ Works end-to-end with real tool use. Beyond S1 (fixed):
 - RLS checks: a second org sees 0 of the first org's rows; inserting into, updating, or deleting another org's rows fails; creating an admin profile in another org fails; staff can read shifts but only their own employee row; staff can't create shifts, can file their own pending time-off, can't self-approve or promote themselves; the `anon` role is denied.
 - Data-copy script run against mocked Appwrite data (150 employees across two pages, orphaned records, both hash types), then its output loaded into the real schema: all rows accepted; ids remapped consistently; assignments to deleted employees dropped with names kept in step; Argon2 hashes passed through for password-preserving import.
 - `tsc --noEmit` and `next build` pass with no environment variables set.
-- **Not yet verified:** a live run against a real Supabase project and your real Appwrite data (needs your keys). Do the `--dry-run` first.
+- Applied to the live `TimeSync` Supabase project; Supabase's security advisor reports one intentional warning (`bootstrap_organization` is callable by signed-in users — it is the signup call and refuses anyone who already has an org).
+- **Not yet verified:** the RLS checks against the live project, and a run of the data-copy script against your real Appwrite data (needs your keys). Do the `--dry-run` first.
 
 ### Cut-over checklist
-1. Create a Supabase project and apply the migration (`docs/SUPABASE_SETUP.md` §1).
+1. ~~Create a Supabase project and apply the migrations~~ — done (`TimeSync`, ref `mnugebtlenlnkiinsyhn`).
 2. Configure Auth (§2) and set the four env vars locally and in Vercel (§3).
 3. Run the data copy with `--dry-run`, then for real (§4).
 4. Deploy; sign in as an existing admin to confirm data and login.
