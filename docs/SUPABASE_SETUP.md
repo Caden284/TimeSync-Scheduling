@@ -8,8 +8,10 @@ employees, rules — lives in the Supabase dashboard under **Table Editor** and
 ## 1. Create the database schema
 
 > **`TimeSync` project** (ref `mnugebtlenlnkiinsyhn`, us-east-1, organization "Kaizen Koding"):
-> the first two migrations are applied; `scheduling_core` must be applied before deploying
-> the current app. Repeat this step in full only for a new project (for example a staging copy).
+> all three migrations are applied. `scheduling_core` was run from the SQL Editor, so it isn't in
+> the project's migration history — before using `supabase db push` against this project, run
+> `npx supabase migration repair --status applied 20261025040000` once. Repeat this step in full
+> only for a new project (for example a staging copy).
 
 The whole schema lives in [`supabase/migrations/`](../supabase/migrations), applied in
 filename order:
@@ -25,8 +27,7 @@ Apply them to a new project either way:
 - **Dashboard:** **SQL Editor → New query**, paste each file in order, and run it.
 - **CLI:** `npx supabase link --project-ref <ref>` then `npx supabase db push`.
 
-The first two filenames match the versions recorded in the live project, so `db push`
-against `TimeSync` only applies migrations added after them.
+After that repair, `db push` against `TimeSync` only applies migrations added later.
 
 ## 2. Configure Auth
 
