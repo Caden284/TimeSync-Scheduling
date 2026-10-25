@@ -28,8 +28,8 @@ export default function LocationsPage() {
     setLoading(true);
     Promise.all([getLocations(profile.orgId), getDepartments(profile.orgId)])
       .then(([locs, depts]) => {
-        setLocations(locs.map(d => ({ ...d, id: d.$id })));
-        setDepartments(depts.map(d => ({ ...d, id: d.$id })));
+        setLocations(locs);
+        setDepartments(depts);
       })
       .catch(() => addToast({ type: 'error', title: 'Failed to load locations' }))
       .finally(() => setLoading(false));
@@ -197,7 +197,7 @@ export default function LocationsPage() {
         <AddLocationModal
           onClose={() => setShowAddModal(false)}
           onSaved={loc => {
-            setLocations(prev => [...prev, { ...loc, id: loc.$id ?? loc.id }]);
+            setLocations(prev => [...prev, { ...loc, id: loc.id }]);
             addToast({ type: 'success', title: 'Location added' });
           }}
         />

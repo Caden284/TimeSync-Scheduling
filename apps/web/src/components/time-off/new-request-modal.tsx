@@ -37,7 +37,7 @@ export function NewRequestModal({ onClose, onSaved, employees = [] }: Props) {
         endDate: form.endDate,
         reason: form.reason,
       });
-      onSaved({ id: doc.$id, ...form, status: 'pending', submittedAt: new Date().toISOString().split('T')[0], hours: 8 });
+      onSaved({ id: doc.id, ...form, status: 'pending', submittedAt: new Date().toISOString().split('T')[0], hours: 8 });
       onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Failed to submit request.');

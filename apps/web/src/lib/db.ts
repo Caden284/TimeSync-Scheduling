@@ -1,133 +1,127 @@
 'use client';
 
-import { databases, DATABASE_ID, COLLECTIONS, ID, Query } from './appwrite';
-import { Permission, Role } from 'appwrite';
+import { supabase, TABLES, fromRow, toRow, must } from './supabase';
 
-// Any logged-in user can read, update, and delete documents created by this app
-function userPerms() {
-  return [
-    Permission.read(Role.users()),
-    Permission.update(Role.users()),
-    Permission.delete(Role.users()),
-  ];
+// Access control is enforced by Row Level Security in Postgres
+// (supabase/migrations): users only ever see their own organization's rows,
+// and only admins can write. Nothing here needs to attach permissions.
+
+async function insertOne(table: string, data: Record<string, any>) {
+  return fromRow(must(await supabase.from(table).insert(toRow(data)).select().single()));
+}
+
+async function updateOne(table: string, id: string, data: Record<string, any>) {
+  return fromRow(must(await supabase.from(table).update(toRow(data)).eq('id', id).select().single()));
+}
+
+async function deleteOne(table: string, id: string) {
+  must(await supabase.from(table).delete().eq('id', id));
+}
+
+// Empty strings from unset form fields are not valid uuids.
+function nullIfEmpty(v?: string | null) {
+  return v ? v : null;
 }
 
 // ── Organizations ─────────────────────────────────────────────────────────────
 
 export async function getOrg(orgId: string) {
-  return databases.getDocument(DATABASE_ID, COLLECTIONS.ORGANIZATIONS, orgId);
+  return fromRow(must(await supabase.from(TABLES.ORGANIZATIONS).select().eq('id', orgId).single()));
 }
 
 export async function createOrg(data: {
   name: string; vertical: string; timezone: string;
   primaryColor: string; logoInitials: string;
 }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.ORGANIZATIONS, ID.unique(), data, userPerms());
+  return insertOne(TABLES.ORGANIZATIONS, data);
 }
 
 export async function updateOrg(orgId: string, data: Partial<{
   name: string; vertical: string; timezone: string;
   primaryColor: string; logoInitials: string;
 }>) {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.ORGANIZATIONS, orgId, data);
+  return updateOne(TABLES.ORGANIZATIONS, orgId, data);
 }
 
 // ── Departments ───────────────────────────────────────────────────────────────
 
 export async function getDepartments(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.DEPARTMENTS, [
-    Query.equal('orgId', orgId),
-    Query.orderAsc('name'),
-    Query.limit(100),
-  ]);
-  return res.documents;
+  const rows = must(await supabase.from(TABLES.DEPARTMENTS).select()
+    .eq('org_id', orgId).order('name').limit(100));
+  return rows.map(r => fromRow(r));
 }
 
 export async function createDepartment(orgId: string, name: string, color: string) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.DEPARTMENTS, ID.unique(), { orgId, name, color }, userPerms());
+  return insertOne(TABLES.DEPARTMENTS, { orgId, name, color });
 }
 
 export async function deleteDepartment(deptId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.DEPARTMENTS, deptId);
+  return deleteOne(TABLES.DEPARTMENTS, deptId);
 }
 
 // ── Locations ─────────────────────────────────────────────────────────────────
 
 export async function getLocations(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.LOCATIONS, [
-    Query.equal('orgId', orgId),
-    Query.orderAsc('name'),
-    Query.limit(100),
-  ]);
-  return res.documents;
+  const rows = must(await supabase.from(TABLES.LOCATIONS).select()
+    .eq('org_id', orgId).order('name').limit(100));
+  return rows.map(r => fromRow(r));
 }
 
 export async function createLocation(orgId: string, data: { name: string; city?: string; state?: string }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.LOCATIONS, ID.unique(), { orgId, ...data }, userPerms());
+  return insertOne(TABLES.LOCATIONS, { orgId, ...data });
 }
 
 export async function deleteLocation(locationId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.LOCATIONS, locationId);
+  return deleteOne(TABLES.LOCATIONS, locationId);
 }
 
 // ── Employees ─────────────────────────────────────────────────────────────────
 
 export async function getEmployees(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.EMPLOYEES, [
-    Query.equal('orgId', orgId),
-    Query.equal('isActive', true),
-    Query.orderAsc('lastName'),
-    Query.limit(500),
-  ]);
-  return res.documents;
+  const rows = must(await supabase.from(TABLES.EMPLOYEES).select()
+    .eq('org_id', orgId).eq('is_active', true).order('last_name').limit(500));
+  return rows.map(r => fromRow(r));
 }
 
 export async function createEmployee(orgId: string, data: {
   firstName: string; lastName: string; email: string; phone?: string;
   role: string; departmentId?: string; employmentType: string; payRate?: number;
 }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, ID.unique(), {
-    orgId, ...data, isActive: true,
-  }, userPerms());
+  return insertOne(TABLES.EMPLOYEES, { orgId, ...data, isActive: true });
 }
 
 export async function updateEmployee(employeeId: string, data: Record<string, unknown>) {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, employeeId, data);
+  return updateOne(TABLES.EMPLOYEES, employeeId, data);
 }
 
 export async function deleteEmployee(employeeId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, employeeId);
+  return deleteOne(TABLES.EMPLOYEES, employeeId);
 }
 
 // ── Schedules ─────────────────────────────────────────────────────────────────
 
 export async function getSchedules(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SCHEDULES, [
-    Query.equal('orgId', orgId),
-    Query.orderDesc('weekStart'),
-    Query.limit(52),
-  ]);
-  return res.documents;
+  const rows = must(await supabase.from(TABLES.SCHEDULES).select()
+    .eq('org_id', orgId).order('week_start', { ascending: false }).limit(52));
+  return rows.map(r => fromRow(r));
 }
 
 export async function createSchedule(orgId: string, weekStart: string, weekEnd: string) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.SCHEDULES, ID.unique(), {
-    orgId, weekStart, weekEnd, status: 'draft',
-  }, userPerms());
+  return insertOne(TABLES.SCHEDULES, { orgId, weekStart, weekEnd, status: 'draft' });
 }
 
 export async function updateScheduleStatus(scheduleId: string, status: 'draft' | 'review' | 'published') {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.SCHEDULES, scheduleId, { status });
+  return updateOne(TABLES.SCHEDULES, scheduleId, { status });
 }
 
 // ── Shifts ────────────────────────────────────────────────────────────────────
 
 export async function getShifts(orgId: string, weekStart?: string, weekEnd?: string) {
-  const filters = [Query.equal('orgId', orgId), Query.limit(500)];
-  if (weekStart) filters.push(Query.greaterThanEqual('date', weekStart));
-  if (weekEnd)   filters.push(Query.lessThanEqual('date', weekEnd));
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SHIFTS, filters);
-  return res.documents;
+  let q = supabase.from(TABLES.SHIFTS).select().eq('org_id', orgId);
+  if (weekStart) q = q.gte('date', weekStart);
+  if (weekEnd)   q = q.lte('date', weekEnd);
+  const rows = must(await q.order('date').order('start_time').limit(500));
+  return rows.map(r => fromRow(r));
 }
 
 export async function createShift(data: {
@@ -138,69 +132,59 @@ export async function createShift(data: {
   shiftType: string; status: string; isOpen: boolean;
   minStaff: number; maxStaff?: number; color?: string; notes?: string;
 }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.SHIFTS, ID.unique(), data, userPerms());
+  return insertOne(TABLES.SHIFTS, { ...data, scheduleId: nullIfEmpty(data.scheduleId) ?? undefined });
 }
 
 export async function updateShift(shiftId: string, data: Record<string, unknown>) {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.SHIFTS, shiftId, data);
+  return updateOne(TABLES.SHIFTS, shiftId, data);
 }
 
 export async function deleteShift(shiftId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SHIFTS, shiftId);
+  return deleteOne(TABLES.SHIFTS, shiftId);
 }
 
 // ── Shift Assignments ─────────────────────────────────────────────────────────
 
 export async function getAssignments(shiftId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SHIFT_ASSIGNMENTS, [
-    Query.equal('shiftId', shiftId),
-  ]);
-  return res.documents;
+  const rows = must(await supabase.from(TABLES.SHIFT_ASSIGNMENTS).select().eq('shift_id', shiftId));
+  return rows.map(r => fromRow(r));
 }
 
 export async function assignEmployee(shiftId: string, employeeId: string, employeeName: string) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.SHIFT_ASSIGNMENTS, ID.unique(), {
-    shiftId, employeeId, employeeName, status: 'confirmed',
-  }, userPerms());
+  return insertOne(TABLES.SHIFT_ASSIGNMENTS, { shiftId, employeeId, employeeName, status: 'confirmed' });
 }
 
 export async function removeAssignment(assignmentId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SHIFT_ASSIGNMENTS, assignmentId);
+  return deleteOne(TABLES.SHIFT_ASSIGNMENTS, assignmentId);
 }
 
 // ── Time Off Requests ─────────────────────────────────────────────────────────
 
 export async function getTimeOffRequests(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.TIME_OFF_REQUESTS, [
-    Query.equal('orgId', orgId),
-    Query.orderDesc('$createdAt'),
-    Query.limit(200),
-  ]);
-  return res.documents;
+  const rows = must(await supabase.from(TABLES.TIME_OFF_REQUESTS).select()
+    .eq('org_id', orgId).order('created_at', { ascending: false }).limit(200));
+  return rows.map(r => fromRow(r));
 }
 
 export async function createTimeOffRequest(data: {
   orgId: string; employeeId: string; employeeName: string;
   leaveType: string; startDate: string; endDate: string; reason?: string;
 }) {
-  return databases.createDocument(DATABASE_ID, COLLECTIONS.TIME_OFF_REQUESTS, ID.unique(), {
-    ...data, status: 'pending',
-  }, userPerms());
+  return insertOne(TABLES.TIME_OFF_REQUESTS, {
+    ...data, employeeId: nullIfEmpty(data.employeeId), status: 'pending',
+  });
 }
 
 export async function updateTimeOffStatus(requestId: string, status: 'approved' | 'denied') {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.TIME_OFF_REQUESTS, requestId, { status });
+  return updateOne(TABLES.TIME_OFF_REQUESTS, requestId, { status });
 }
 
 // ── Scheduling Rules ──────────────────────────────────────────────────────────
 
 export async function getRules(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, [
-    Query.equal('orgId', orgId),
-    Query.orderAsc('priority'),
-    Query.limit(200),
-  ]);
-  return res.documents.map(docToRule);
+  const rows = must(await supabase.from(TABLES.SCHEDULING_RULES).select()
+    .eq('org_id', orgId).order('priority').limit(200));
+  return rows.map(rowToRule);
 }
 
 export async function createRule(orgId: string, data: {
@@ -209,97 +193,115 @@ export async function createRule(orgId: string, data: {
   priority: number; weight?: number; parameters?: Record<string, unknown>;
   scopeDepts?: string[]; scopeLocations?: string[]; scopeRoles?: string[];
 }) {
-  const doc = await databases.createDocument(
-    DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ID.unique(),
-    {
-      orgId,
-      name: data.name,
-      ruleType: data.ruleType,
-      constraintType: data.constraintType,
-      description: data.description ?? '',
-      isEnabled: data.isEnabled ?? true,
-      isSystem: data.isSystem ?? false,
-      priority: data.priority,
-      weight: data.weight ?? null,
-      parameters: data.parameters ? JSON.stringify(data.parameters) : '{}',
-      scopeDepts: data.scopeDepts ?? [],
-      scopeLocations: data.scopeLocations ?? [],
-      scopeRoles: data.scopeRoles ?? [],
-    },
-    userPerms()
-  );
-  return docToRule(doc);
+  const row = must(await supabase.from(TABLES.SCHEDULING_RULES).insert(toRow({
+    orgId,
+    name: data.name,
+    ruleType: data.ruleType,
+    constraintType: data.constraintType,
+    description: data.description ?? '',
+    isEnabled: data.isEnabled ?? true,
+    isSystem: data.isSystem ?? false,
+    priority: data.priority,
+    weight: data.weight ?? null,
+    parameters: data.parameters ?? {},
+    scopeDepts: data.scopeDepts ?? [],
+    scopeLocations: data.scopeLocations ?? [],
+    scopeRoles: data.scopeRoles ?? [],
+  })).select().single());
+  return rowToRule(row);
 }
 
 export async function updateRule(ruleId: string, patch: {
   name?: string; description?: string; isEnabled?: boolean;
   priority?: number; weight?: number; parameters?: Record<string, unknown>;
 }) {
-  const data: Record<string, unknown> = { ...patch };
-  if (patch.parameters !== undefined) {
-    data.parameters = JSON.stringify(patch.parameters);
-    delete data.parameters; // re-add as string
-    data.parameters = JSON.stringify(patch.parameters);
-  }
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId, data);
+  return updateOne(TABLES.SCHEDULING_RULES, ruleId, patch);
 }
 
 export async function toggleRule(ruleId: string, isEnabled: boolean) {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId, { isEnabled });
+  return updateOne(TABLES.SCHEDULING_RULES, ruleId, { isEnabled });
 }
 
 export async function deleteRule(ruleId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SCHEDULING_RULES, ruleId);
+  return deleteOne(TABLES.SCHEDULING_RULES, ruleId);
+}
+
+function rowToRule(row: any) {
+  const r = fromRow(row);
+  return {
+    id: r.id,
+    orgId: r.orgId,
+    name: r.name,
+    ruleType: r.ruleType,
+    constraintType: r.constraintType as 'hard' | 'soft',
+    description: r.description ?? '',
+    isEnabled: r.isEnabled ?? true,
+    isSystem: r.isSystem ?? false,
+    priority: r.priority ?? 50,
+    weight: r.weight ?? undefined,
+    parameters: r.parameters ?? {},
+    conditions: [],
+    scopeDepts: r.scopeDepts ?? [],
+    scopeLocations: r.scopeLocations ?? [],
+    scopeRoles: r.scopeRoles ?? [],
+    createdAt: r.createdAt,
+  };
 }
 
 // ── Seasons ───────────────────────────────────────────────────────────────────
 
+const EMPTY_HOURS = { sun: { start: '', end: '' }, mon: { start: '', end: '' }, tue: { start: '', end: '' }, wed: { start: '', end: '' }, thu: { start: '', end: '' }, fri: { start: '', end: '' }, sat: { start: '', end: '' } };
+
+function parseHoursJson(hoursJson?: string) {
+  if (hoursJson === undefined) return undefined;
+  try { return JSON.parse(hoursJson); } catch { return EMPTY_HOURS; }
+}
+
 export async function getSeasons(orgId: string) {
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SEASONS, [
-    Query.equal('orgId', orgId),
-    Query.orderAsc('startDate'),
-    Query.limit(50),
-  ]);
-  return res.documents.map(docToSeason);
+  const rows = must(await supabase.from(TABLES.SEASONS).select()
+    .eq('org_id', orgId).order('start_date').limit(50));
+  return rows.map(rowToSeason);
 }
 
 export async function createSeason(orgId: string, data: {
   name: string; seasonType: string; startDate: string; endDate: string;
   isActive?: boolean; hoursJson: string;
 }) {
-  const doc = await databases.createDocument(
-    DATABASE_ID, COLLECTIONS.SEASONS, ID.unique(),
-    { orgId, ...data, isActive: data.isActive ?? false },
-    userPerms()
-  );
-  return docToSeason(doc);
+  const { hoursJson, ...rest } = data;
+  const row = must(await supabase.from(TABLES.SEASONS).insert(toRow({
+    orgId, ...rest, isActive: data.isActive ?? false, hours: parseHoursJson(hoursJson),
+  })).select().single());
+  return rowToSeason(row);
 }
 
 export async function updateSeason(seasonId: string, data: Partial<{
   name: string; seasonType: string; startDate: string; endDate: string;
   isActive: boolean; hoursJson: string;
 }>) {
-  const doc = await databases.updateDocument(DATABASE_ID, COLLECTIONS.SEASONS, seasonId, data);
-  return docToSeason(doc);
+  const { hoursJson, ...rest } = data;
+  const row = must(await supabase.from(TABLES.SEASONS)
+    .update(toRow({ ...rest, hours: parseHoursJson(hoursJson) }))
+    .eq('id', seasonId).select().single());
+  return rowToSeason(row);
 }
 
 export async function deleteSeason(seasonId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SEASONS, seasonId);
+  return deleteOne(TABLES.SEASONS, seasonId);
 }
 
-function docToSeason(doc: any) {
-  let hours = { sun: { start: '', end: '' }, mon: { start: '', end: '' }, tue: { start: '', end: '' }, wed: { start: '', end: '' }, thu: { start: '', end: '' }, fri: { start: '', end: '' }, sat: { start: '', end: '' } };
-  try { if (doc.hoursJson) hours = JSON.parse(doc.hoursJson); } catch {}
-  return { id: doc.$id, orgId: doc.orgId, name: doc.name, seasonType: doc.seasonType, startDate: doc.startDate, endDate: doc.endDate, isActive: doc.isActive ?? false, hours, createdAt: doc.$createdAt };
+function rowToSeason(row: any) {
+  const r = fromRow(row);
+  const hours = r.hours && Object.keys(r.hours).length > 0 ? r.hours : EMPTY_HOURS;
+  return { id: r.id, orgId: r.orgId, name: r.name, seasonType: r.seasonType, startDate: r.startDate, endDate: r.endDate, isActive: r.isActive ?? false, hours, createdAt: r.createdAt };
 }
 
 // ── Shift Templates ───────────────────────────────────────────────────────────
 
 export async function getShiftTemplates(orgId: string, seasonId?: string) {
-  const filters: any[] = [Query.equal('orgId', orgId), Query.limit(200)];
-  if (seasonId) filters.push(Query.equal('seasonId', seasonId));
-  const res = await databases.listDocuments(DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, filters);
-  return res.documents.map(docToTemplate);
+  let q = supabase.from(TABLES.SHIFT_TEMPLATES).select().eq('org_id', orgId);
+  if (seasonId) q = q.eq('season_id', seasonId);
+  const rows = must(await q.order('start_time').limit(200));
+  return rows.map(rowToTemplate);
 }
 
 export async function createShiftTemplate(orgId: string, data: {
@@ -307,12 +309,10 @@ export async function createShiftTemplate(orgId: string, data: {
   color?: string; departmentId?: string; departmentName?: string;
   minStaff?: number; daysOfWeek: number[]; isActive?: boolean; notes?: string;
 }) {
-  const doc = await databases.createDocument(
-    DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, ID.unique(),
-    { orgId, ...data, minStaff: data.minStaff ?? 1, isActive: data.isActive ?? true, daysOfWeek: JSON.stringify(data.daysOfWeek) },
-    userPerms()
-  );
-  return docToTemplate(doc);
+  const row = must(await supabase.from(TABLES.SHIFT_TEMPLATES).insert(toRow({
+    orgId, ...data, minStaff: data.minStaff ?? 1, isActive: data.isActive ?? true,
+  })).select().single());
+  return rowToTemplate(row);
 }
 
 export async function updateShiftTemplate(templateId: string, data: Partial<{
@@ -320,47 +320,23 @@ export async function updateShiftTemplate(templateId: string, data: Partial<{
   departmentId: string; departmentName: string; minStaff: number;
   daysOfWeek: number[]; isActive: boolean; notes: string;
 }>) {
-  const payload: any = { ...data };
-  if (data.daysOfWeek !== undefined) payload.daysOfWeek = JSON.stringify(data.daysOfWeek);
-  const doc = await databases.updateDocument(DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, templateId, payload);
-  return docToTemplate(doc);
+  const row = must(await supabase.from(TABLES.SHIFT_TEMPLATES)
+    .update(toRow(data)).eq('id', templateId).select().single());
+  return rowToTemplate(row);
 }
 
 export async function deleteShiftTemplate(templateId: string) {
-  return databases.deleteDocument(DATABASE_ID, COLLECTIONS.SHIFT_TEMPLATES, templateId);
+  return deleteOne(TABLES.SHIFT_TEMPLATES, templateId);
 }
 
-function docToTemplate(doc: any) {
-  let daysOfWeek: number[] = [];
-  try { daysOfWeek = JSON.parse(doc.daysOfWeek ?? '[]'); } catch {}
-  return { id: doc.$id, orgId: doc.orgId, seasonId: doc.seasonId, name: doc.name, startTime: doc.startTime, endTime: doc.endTime, color: doc.color ?? '#6366f1', departmentId: doc.departmentId, departmentName: doc.departmentName, minStaff: doc.minStaff ?? 1, daysOfWeek, isActive: doc.isActive ?? true, notes: doc.notes, createdAt: doc.$createdAt };
+function rowToTemplate(row: any) {
+  const r = fromRow(row);
+  // Postgres `time` comes back as HH:mm:ss; the template editor works in HH:mm.
+  return { id: r.id, orgId: r.orgId, seasonId: r.seasonId, name: r.name, startTime: r.startTime?.slice(0, 5), endTime: r.endTime?.slice(0, 5), color: r.color ?? '#6366f1', departmentId: r.departmentId, departmentName: r.departmentName, minStaff: r.minStaff ?? 1, daysOfWeek: r.daysOfWeek ?? [], isActive: r.isActive ?? true, notes: r.notes, createdAt: r.createdAt };
 }
 
 // ── Employee Availability ─────────────────────────────────────────────────────
 
 export async function updateEmployeeAvailability(employeeId: string, weeklyAvailability: object) {
-  return databases.updateDocument(DATABASE_ID, COLLECTIONS.EMPLOYEES, employeeId, {
-    weeklyAvailability: JSON.stringify(weeklyAvailability),
-  });
-}
-
-function docToRule(doc: any) {
-  return {
-    id: doc.$id,
-    orgId: doc.orgId,
-    name: doc.name,
-    ruleType: doc.ruleType,
-    constraintType: doc.constraintType as 'hard' | 'soft',
-    description: doc.description ?? '',
-    isEnabled: doc.isEnabled ?? true,
-    isSystem: doc.isSystem ?? false,
-    priority: doc.priority ?? 50,
-    weight: doc.weight ?? undefined,
-    parameters: (() => { try { return JSON.parse(doc.parameters ?? '{}'); } catch { return {}; } })(),
-    conditions: [],
-    scopeDepts: doc.scopeDepts ?? [],
-    scopeLocations: doc.scopeLocations ?? [],
-    scopeRoles: doc.scopeRoles ?? [],
-    createdAt: doc.$createdAt,
-  };
+  return updateOne(TABLES.EMPLOYEES, employeeId, { weeklyAvailability });
 }

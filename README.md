@@ -90,19 +90,16 @@ uvicorn main:app --port 8000 --reload
 
 ### Environment Variables
 
-```bash
-# apps/api/.env
-DATABASE_URL="postgresql://user:pass@localhost:5432/timesync"
-REDIS_URL="redis://localhost:6379"
-JWT_SECRET="your-secret-key-min-32-chars"
-ANTHROPIC_API_KEY="sk-ant-..."
-SCHEDULER_URL="http://localhost:8000"
-ALLOWED_ORIGINS="http://localhost:3000"
+The web app's backend is Supabase (auth + Postgres). See
+[docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) for the full setup, including
+applying the schema in `supabase/migrations/`.
 
-# apps/web/.env.local
-NEXT_PUBLIC_API_URL="http://localhost:4000/api/v1"
-NEXT_PUBLIC_WS_URL="ws://localhost:4001"
-NEXTAUTH_SECRET="your-nextauth-secret"
+```bash
+# apps/web/.env.local  (template: apps/web/.env.example)
+NEXT_PUBLIC_SUPABASE_URL="https://YOUR-PROJECT-REF.supabase.co"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_..."
+SUPABASE_SECRET_KEY="sb_secret_..."      # server only
+ANTHROPIC_API_KEY="sk-ant-..."           # server only
 ```
 
 ---
@@ -147,6 +144,8 @@ NEXTAUTH_SECRET="your-nextauth-secret"
 
 | Document | Path |
 |----------|------|
+| Supabase Setup | [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) |
+| Platform Audit (Oct 2026) | [docs/AUDIT.md](docs/AUDIT.md) |
 | Product Requirements Document | [docs/PRD.md](docs/PRD.md) |
 | System Architecture | [docs/architecture/system-architecture.md](docs/architecture/system-architecture.md) |
 | Database Schema | [docs/schemas/database-schema.sql](docs/schemas/database-schema.sql) |

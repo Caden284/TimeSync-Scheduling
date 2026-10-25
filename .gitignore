@@ -17,3 +17,8 @@ prisma/migrations/
 *.tsbuildinfo
 .env.local
 .vercel
+
+# Supabase CLI + one-time Appwrite migration output
+supabase/.temp/
+supabase/.branches/
+appwrite-migration-credentials.csv

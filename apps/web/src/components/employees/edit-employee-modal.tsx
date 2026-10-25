@@ -28,9 +28,9 @@ const BLANK_AVAIL: WeeklyAvailability = {
   sat: { start: '', end: '' },
 };
 
-function parseAvailability(raw?: string): WeeklyAvailability {
-  if (!raw) return BLANK_AVAIL;
-  try { return { ...BLANK_AVAIL, ...JSON.parse(raw) }; } catch { return BLANK_AVAIL; }
+function parseAvailability(raw?: Partial<WeeklyAvailability> | null): WeeklyAvailability {
+  if (!raw || Object.keys(raw).length === 0) return BLANK_AVAIL;
+  return { ...BLANK_AVAIL, ...raw };
 }
 
 export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Props) {
@@ -71,7 +71,7 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
   async function handleSave() {
     setSaving(true); setError('');
     try {
-      const empId = employee.id ?? employee.$id;
+      const empId = employee.id;
       await updateEmployee(empId, {
         firstName: form.firstName, lastName: form.lastName, email: form.email,
         phone: form.phone, role: form.role, departmentId: form.departmentId,
@@ -79,7 +79,7 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,
       });
       await updateEmployeeAvailability(empId, avail);
-      onSaved({ ...employee, ...form, payRate: form.payRate ? parseFloat(form.payRate) : undefined, weeklyAvailability: JSON.stringify(avail) });
+      onSaved({ ...employee, ...form, payRate: form.payRate ? parseFloat(form.payRate) : undefined, weeklyAvailability: avail });
       onClose();
     } catch (e: any) { setError(e?.message ?? 'Save failed.'); }
     finally { setSaving(false); }
@@ -88,8 +88,8 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
   async function handleDelete() {
     setSaving(true);
     try {
-      await deleteEmployee(employee.id ?? employee.$id);
-      onDeleted(employee.id ?? employee.$id);
+      await deleteEmployee(employee.id);
+      onDeleted(employee.id);
       onClose();
     } catch (e: any) { setError(e?.message ?? 'Delete failed.'); setSaving(false); }
   }

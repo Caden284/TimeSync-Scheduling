@@ -35,7 +35,7 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,
       });
       onSaved({
-        id: doc.$id, firstName: form.firstName, lastName: form.lastName, email: form.email,
+        id: doc.id, firstName: form.firstName, lastName: form.lastName, email: form.email,
         phone: form.phone,
         role: form.role, departmentId: form.departmentId,
         departmentName: dept?.name ?? '', employmentType: form.employmentType,
@@ -44,7 +44,7 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
       });
       onClose();
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to save. Check Appwrite connection.');
+      setError(e?.message ?? 'Failed to save. Check your connection.');
     } finally { setSaving(false); }
   }
 

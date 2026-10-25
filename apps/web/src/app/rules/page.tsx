@@ -26,7 +26,7 @@ const RULE_TYPE_ICONS: Record<string, string> = {
   SENIORITY_ORDER: '🏆', SKILL_MATCH_QUALITY: '🎯',
 };
 
-// Default system rules seeded the first time an org has no rules in Appwrite
+// Default system rules seeded the first time an org has no rules in the database
 const SYSTEM_DEFAULTS = mockRules.filter(r =>
   ['MAX_HOURS_WEEK', 'MIN_REST_BETWEEN', 'PREFER_AVAILABILITY', 'BALANCE_WEEKENDS', 'MINIMIZE_OVERTIME'].includes(r.ruleType)
 );
@@ -41,14 +41,14 @@ export default function RulesPage() {
   const [toggling, setToggling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  // Load rules from Appwrite on mount
+  // Load rules from Supabase on mount
   useEffect(() => {
     if (!profile?.orgId) return;
     setLoading(true);
     getRules(profile.orgId)
       .then(async (fetched) => {
         if (fetched.length === 0) {
-          // First-time: seed universal defaults into Appwrite
+          // First-time: seed universal defaults into the database
           const seeded: SchedulingRule[] = [];
           for (const r of SYSTEM_DEFAULTS) {
             try {

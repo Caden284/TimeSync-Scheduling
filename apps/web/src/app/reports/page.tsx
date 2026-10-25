@@ -76,7 +76,7 @@ export default function ReportsPage() {
         // Per-employee scheduled hours
         const empHours: Record<string, { name: string; dept: string; type: string; payRate: string; hours: number }> = {};
         for (const e of employees) {
-          empHours[e.$id] = {
+          empHours[e.id] = {
             name: `${e.firstName} ${e.lastName}`,
             dept: e.departmentName ?? '',
             type: (e.employmentType ?? '').replace('_', '-'),
@@ -111,7 +111,7 @@ export default function ReportsPage() {
 
       } else if (reportId === 'payroll-export') {
         const rows = employees.map(e => [
-          e.$id.slice(0, 8).toUpperCase(),
+          e.id.slice(0, 8).toUpperCase(),
           `${e.firstName} ${e.lastName}`,
           e.email ?? '',
           (e.employmentType ?? '').replace('_', '-'),
@@ -130,7 +130,7 @@ export default function ReportsPage() {
           r.endDate ?? '',
           r.reason ?? '',
           r.status ?? '',
-          r.$createdAt?.split('T')[0] ?? '',
+          r.createdAt?.split('T')[0] ?? '',
         ]);
         downloadCSV(`time-off-${today}.csv`,
           ['Employee', 'Leave Type', 'Start Date', 'End Date', 'Reason', 'Status', 'Submitted'],
@@ -143,7 +143,7 @@ export default function ReportsPage() {
           (e.employmentType ?? '').replace('_', '-'),
           e.departmentName ?? '',
           e.payRate ? `$${parseFloat(e.payRate).toFixed(2)}/hr` : '—',
-          e.$createdAt?.split('T')[0] ?? '',
+          e.createdAt?.split('T')[0] ?? '',
         ]);
         downloadCSV(`headcount-${today}.csv`,
           ['Name', 'Email', 'Type', 'Department', 'Pay Rate', 'Added'],
@@ -317,7 +317,7 @@ export default function ReportsPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {employees.slice(0, 10).map(e => (
-                        <tr key={e.$id} className="hover:bg-gray-50/50">
+                        <tr key={e.id} className="hover:bg-gray-50/50">
                           <td className="py-2.5 px-3 font-medium text-gray-900">{e.firstName} {e.lastName}</td>
                           <td className="py-2.5 px-3 text-gray-600">{e.email || '—'}</td>
                           <td className="py-2.5 px-3 text-gray-600 capitalize">{(e.employmentType ?? '').replace('_', '-')}</td>

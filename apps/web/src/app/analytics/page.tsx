@@ -146,7 +146,7 @@ export default function AnalyticsPage() {
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar title="Workforce Analytics" subtitle="Live data from your Appwrite records" />
+        <Topbar title="Workforce Analytics" subtitle="Live data from your organization's records" />
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="flex-1 overflow-y-auto">
