@@ -264,6 +264,27 @@ create trigger notify_time_off_change
 
 -- ── Default rules for every new organization ─────────────────────────────────
 
+create or replace function private.insert_default_rules(p_org uuid)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  insert into public.scheduling_rules
+    (org_id, name, description, rule_type, constraint_type, priority, weight, parameters, is_system)
+  values
+    (p_org, 'Weekly Hour Cap', 'No employee may be scheduled for more than 40 hours in a week',
+       'MAX_HOURS_WEEK', 'hard', 5, null, '{"hours": 40}', true),
+    (p_org, 'Minimum Rest Between Shifts', 'Employees need at least 10 hours off between shifts',
+       'MIN_REST_BETWEEN', 'hard', 8, null, '{"hours": 10}', true),
+    (p_org, 'Honor Employee Availability', 'Prefer scheduling within each employee''s availability',
+       'PREFER_AVAILABILITY', 'soft', 100, 0.9, '{}', true),
+    (p_org, 'Minimize Overtime', 'Warn before scheduling anyone past 40 hours in a week',
+       'MINIMIZE_OVERTIME', 'soft', 105, 0.8, '{"hours": 40}', true),
+    (p_org, 'Balance Weekend Shifts', 'Spread weekend shifts fairly when auto-scheduling',
+       'BALANCE_WEEKENDS', 'soft', 110, 0.75, '{}', false);
+$$;
+
 create or replace function private.seed_default_rules()
 returns trigger
 language plpgsql
@@ -271,19 +292,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  insert into public.scheduling_rules
-    (org_id, name, description, rule_type, constraint_type, priority, weight, parameters, is_system)
-  values
-    (new.id, 'Weekly Hour Cap', 'No employee may be scheduled for more than 40 hours in a week',
-       'MAX_HOURS_WEEK', 'hard', 5, null, '{"hours": 40}', true),
-    (new.id, 'Minimum Rest Between Shifts', 'Employees need at least 10 hours off between shifts',
-       'MIN_REST_BETWEEN', 'hard', 8, null, '{"hours": 10}', true),
-    (new.id, 'Honor Employee Availability', 'Prefer scheduling within each employee''s availability',
-       'PREFER_AVAILABILITY', 'soft', 100, 0.9, '{}', true),
-    (new.id, 'Minimize Overtime', 'Warn before scheduling anyone past 40 hours in a week',
-       'MINIMIZE_OVERTIME', 'soft', 105, 0.8, '{"hours": 40}', true),
-    (new.id, 'Balance Weekend Shifts', 'Spread weekend shifts fairly when auto-scheduling',
-       'BALANCE_WEEKENDS', 'soft', 110, 0.75, '{}', false);
+  perform private.insert_default_rules(new.id);
   return new;
 end;
 $$;
@@ -291,6 +300,12 @@ $$;
 create trigger seed_default_rules
   after insert on public.organizations
   for each row execute function private.seed_default_rules();
+
+-- Organizations created before this migration get the same defaults (only if
+-- they have no rules at all).
+select private.insert_default_rules(o.id)
+from public.organizations o
+where not exists (select 1 from public.scheduling_rules r where r.org_id = o.id);
 
 -- ── Staff self-service ───────────────────────────────────────────────────────
 

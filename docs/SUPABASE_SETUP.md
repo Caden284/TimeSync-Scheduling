@@ -7,9 +7,9 @@ employees, rules — lives in the Supabase dashboard under **Table Editor** and
 
 ## 1. Create the database schema
 
-> **Already done for the `TimeSync` project** (ref `mnugebtlenlnkiinsyhn`, us-east-1,
-> organization "Kaizen Koding"). Both migrations below are applied. Repeat this step
-> only for a new project (for example a staging copy).
+> **`TimeSync` project** (ref `mnugebtlenlnkiinsyhn`, us-east-1, organization "Kaizen Koding"):
+> the first two migrations are applied; `scheduling_core` must be applied before deploying
+> the current app. Repeat this step in full only for a new project (for example a staging copy).
 
 The whole schema lives in [`supabase/migrations/`](../supabase/migrations), applied in
 filename order:
@@ -18,14 +18,15 @@ filename order:
 |---|---|
 | `20261025022713_init.sql` | 13 tables, helper functions, Row Level Security policies |
 | `20261025022820_harden_helpers.sql` | Moves the RLS helper functions into a `private` schema (out of the public API) and adds three foreign-key indexes |
+| `20261025040000_scheduling_core.sql` | Weekly publishing (staff only see published weeks), notifications and their triggers, default rules for every organization, duplicate-proof template shifts, staff availability updates |
 
 Apply them to a new project either way:
 
 - **Dashboard:** **SQL Editor → New query**, paste each file in order, and run it.
 - **CLI:** `npx supabase link --project-ref <ref>` then `npx supabase db push`.
 
-The filenames match the versions recorded in the live project, so `db push` against
-`TimeSync` only applies migrations added after these.
+The first two filenames match the versions recorded in the live project, so `db push`
+against `TimeSync` only applies migrations added after them.
 
 ## 2. Configure Auth
 

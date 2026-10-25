@@ -12,15 +12,15 @@ TimeSync already has a lot of surface area: week, day, month, and timeline calen
 
 The gap is between **what the app looks like it does** and **what it actually does**. Several headline features are visual only, and the people who'd use it most — staff — have almost nothing that works for them yet.
 
-| Area | Grade | One-line verdict |
-|---|---|---|
-| Security | **B** (was **F**) | Data leaks between organizations, the open AI endpoint, and self-promotion to admin are fixed. A few smaller items remain. |
-| Core scheduling | **C−** | You can create and edit shifts, but you can't assign a person to one except by asking the AI. |
-| Rule engine | **D** | Rules are stored and displayed but never enforced — nothing stops a double-booking, overtime, or scheduling someone on approved time off. |
-| Staff experience | **F** | Staff can sign in to "My Schedule", which is always empty. They can't request time off, set availability, or swap shifts. |
-| Phone / tablet use | **D** | Layout is desktop-only; on a phone the sidebar and calendar don't fit. |
-| Trustworthiness of the UI | **D** | Fake notifications, a simulated "Generate schedule" button, a Settings page that doesn't save, and a demo hospital name that leaks into the AI. |
-| Engineering health | **C** | Builds cleanly; no automated tests; outdated framework version; 13 unused packages. |
+| Area | Before → After (Oct 25 update) |
+|---|---|
+| Security | **F → A−** — tenant isolation, open AI endpoint, admin self-promotion, PDF injection, and all dependency advisories fixed (`npm audit`: 0). |
+| Core scheduling | **C− → B+** — assign/remove staff with conflict checks, Auto-Schedule, real Publish. |
+| Rule engine | **D → B+** — hours, rest, consecutive days, overtime, staffing, availability, and time off are enforced; rule types that need missing data are labeled. |
+| Staff experience | **F → B−** — published schedule, coworkers, notifications, time-off requests, availability. No swaps or open-shift pickup yet. |
+| Phone / tablet use | **D → C** — My Schedule works on phones; admin pages are still desktop-first. |
+| Trustworthiness of the UI | **D → A−** — demo data and decorative controls removed; notifications are real. |
+| Engineering health | **C → B−** — Next.js 15.5 / React 19, unused packages gone; still no automated tests or CI. |
 
 ---
 
@@ -156,6 +156,17 @@ It works end-to-end with real database tools, which is a genuine strength. To ma
 | New admins were bounced to the login page after setup | ✅ Fixed |
 | No way to reset a forgotten password | ✅ Added — "Forgot your password?" on the login page |
 | Hard-coded Appwrite project ID in the source | ✅ Removed |
+| Outdated Next.js with critical advisories (5.1) | ✅ Next.js 15.5.28 + React 19; 25 unused packages removed; `npm audit` reports 0 |
+| No way to assign people to shifts (2.1) | ✅ Assign/remove from the shift panel; names show in every view |
+| Staff see an empty My Schedule (2.2) | ✅ Logins link to employee records (Settings → Users & Access) |
+| Rule engine enforces nothing (2.3) | ✅ Conflict checks in the picker, Auto-Schedule, and the AI Copilot |
+| Fake Generate/Publish (2.4) | ✅ Auto-Schedule with preview; per-week publish that controls what staff see |
+| Departments only in one browser (2.5) | ✅ Onboarding, departments, and org settings stored in the database |
+| Fake notifications, demo org, Settings doesn't save (2.6) | ✅ Real notifications (database triggers + live updates); demo data removed |
+| Month view, UTC dates, 8-hour durations, lost edits, duplicate generation, hard delete (2.7) | ✅ All fixed |
+| PDF export injection (5.2) | ✅ Escaped |
+| Staff can't request time off or set availability (§3 items 2–3) | ✅ On My Schedule |
+| Copilot loop drops text / no reply at step limit; told it works for a demo hospital (§6) | ✅ Fixed; context loads from the database |
 
 Supabase project **TimeSync** (`mnugebtlenlnkiinsyhn`, us-east-1) is live with the schema applied. Supabase's security checker reports one intentional warning (the sign-up function is callable by signed-in users by design). Setup steps: [`docs/SUPABASE_SETUP.md`](SUPABASE_SETUP.md).
 
