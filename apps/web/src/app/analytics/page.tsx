@@ -234,7 +234,7 @@ export default function AnalyticsPage() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
                         <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} />
                         <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} unit="h" />
-                        <Tooltip formatter={(v: number) => [`${v.toFixed(1)}h`, 'Hours']} contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }} />
+                        <Tooltip formatter={v => [`${Number(v).toFixed(1)}h`, 'Hours']} contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }} />
                         <Bar dataKey="hours" radius={[4, 4, 0, 0]} name="Hours">
                           {deptBreakdown.map((_, i) => <Cell key={i} fill={DEPT_COLORS[i % DEPT_COLORS.length]} />)}
                         </Bar>
