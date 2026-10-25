@@ -5,7 +5,8 @@ import { X, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Shift } from '@/types';
-import { loadSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
+import { todayISO } from '@/lib/dates';
 
 interface NewShiftModalProps {
   defaultDate?: string;
@@ -25,8 +26,8 @@ const COLORS = ['#6366f1','#ef4444','#f97316','#22c55e','#06b6d4','#8b5cf6','#f5
 const inputCls = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors';
 
 export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalProps) {
-  const setup = loadSetup();
-  const today = new Date().toISOString().split('T')[0];
+  const { departments, locations } = useOrgData();
+  const today = todayISO();
 
   const [form, setForm] = useState({
     title:        '',
@@ -34,9 +35,9 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
     startTime:    '07:00',
     endTime:      '15:00',
     shiftType:    'fixed' as Shift['shiftType'],
-    departmentId: setup?.departments[0]?.id ?? '',
+    departmentId: '',
     roleId:       '',
-    locationId:   setup?.locations[0]?.id ?? '',
+    locationId:   locations.length === 1 ? locations[0].id : '',
     minStaff:     '1',
     maxStaff:     '',
     isOpen:       false,
@@ -49,10 +50,9 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
   }
 
   function handleSave() {
-    const dept = setup?.departments.find(d => d.id === form.departmentId);
-    const loc  = setup?.locations.find(l => l.id === form.locationId);
+    const dept = departments.find(d => d.id === form.departmentId);
+    const loc  = locations.find(l => l.id === form.locationId);
     onSave({
-      scheduleId:   'sched-1',
       templateId:   undefined,
       departmentId: form.departmentId || undefined,
       roleId:       form.roleId       || undefined,
@@ -71,8 +71,8 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
       title:          form.title || undefined,
       notes:          form.notes || undefined,
       color:          form.color,
-      department:     dept ? { id: dept.id, name: dept.name, color: dept.color, orgId: 'local', isActive: true } : undefined,
-      location:       loc  ? { id: loc.id,  name: loc.name,  orgId: 'local', isActive: true } : undefined,
+      department:     dept ? { id: dept.id, name: dept.name, color: dept.color, orgId: dept.orgId, isActive: true } : undefined,
+      location:       loc  ? { id: loc.id,  name: loc.name,  orgId: loc.orgId, isActive: true } : undefined,
     });
     onClose();
   }
@@ -152,7 +152,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">Department</label>
               <select value={form.departmentId} onChange={e => update('departmentId', e.target.value)} className={inputCls}>
                 <option value="">No department</option>
-                {setup?.departments.filter(d => d.name).map(d => (
+                {departments.map(d => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
@@ -161,7 +161,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">Location</label>
               <select value={form.locationId} onChange={e => update('locationId', e.target.value)} className={inputCls}>
                 <option value="">No location</option>
-                {setup?.locations.filter(l => l.name).map(l => (
+                {locations.map(l => (
                   <option key={l.id} value={l.id}>{l.name}</option>
                 ))}
               </select>

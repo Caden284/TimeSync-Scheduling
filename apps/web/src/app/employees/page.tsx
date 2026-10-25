@@ -11,7 +11,6 @@ import { AddEmployeeModal } from '@/components/employees/add-employee-modal';
 import { EditEmployeeModal } from '@/components/employees/edit-employee-modal';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/context/auth-context';
-import { mockOrg } from '@/lib/mock-data';
 import { getEmployees } from '@/lib/db';
 import { employmentTypeBadge, getEmployeeDisplayName, cn } from '@/lib/utils';
 import { Search, Plus, Filter, MoreHorizontal, Mail, Phone, Edit2, X } from 'lucide-react';
@@ -24,7 +23,7 @@ const STATUS_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'default'>
 const EMPLOYMENT_TYPES = ['all', 'full_time', 'part_time', 'contract', 'per_diem'];
 
 export default function EmployeesPage() {
-  const { setOrg, copilotOpen, addToast } = useAppStore();
+  const { copilotOpen, addToast } = useAppStore();
   const { profile } = useAuth();
   const [employees, setEmployees] = useState<any[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
@@ -36,7 +35,6 @@ export default function EmployeesPage() {
   const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
-    setOrg(mockOrg);
     if (profile?.orgId) {
       getEmployees(profile.orgId)
         .then(docs => setEmployees(docs))

@@ -3,11 +3,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Send, Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAppStore, useCopilotStore, useRulesStore } from '@/store';
-import { useAuth } from '@/context/auth-context';
-import { getEmployees, getShifts } from '@/lib/db';
+import { useAppStore, useCopilotStore, useCalendarStore } from '@/store';
 import { authHeaders } from '@/lib/supabase';
-import { format, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { todayISO } from '@/lib/dates';
 import type { CopilotMessage } from '@/types';
 
 const SUGGESTED_PROMPTS = [
@@ -21,27 +19,19 @@ const SUGGESTED_PROMPTS = [
   'What employees can work tomorrow?',
 ];
 
-export function CopilotPanel() {
-  const { toggleCopilot, org, cachedShifts } = useAppStore();
-  const { rules } = useRulesStore();
-  const { profile } = useAuth();
+// `onScheduleChanged` runs after the Copilot writes shifts, so the calendar can refetch.
+export function CopilotPanel({ onScheduleChanged }: { onScheduleChanged?: () => void } = {}) {
+  const { toggleCopilot } = useAppStore();
+  const { currentDate } = useCalendarStore();
   const { conversations, activeConversationId, isStreaming, createConversation, addMessage, appendStreamChunk, finishStreaming, setStreaming } = useCopilotStore();
   const [input, setInput] = useState('');
   const [apiError, setApiError] = useState<string | null>(null);
-  const [employees, setEmployees] = useState<any[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const conversation = conversations.find(c => c.id === activeConversationId);
   const messages = conversation?.messages ?? [];
-
-  // Load employees for context (once)
-  useEffect(() => {
-    if (profile?.orgId) {
-      getEmployees(profile.orgId).then(setEmployees).catch(() => {});
-    }
-  }, [profile?.orgId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -76,51 +66,14 @@ export function CopilotPanel() {
       .filter(m => !m.isStreaming && m.id !== aiMsgId)
       .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
-    // Employee context
-    const empContext = employees.map(e => ({
-      name: `${e.firstName} ${e.lastName}`,
-      role: e.role ?? e.primaryRole?.name,
-      department: e.departmentName ?? e.primaryDept?.name,
-      employmentType: e.employmentType,
-      payRate: e.payRate ? parseFloat(e.payRate).toFixed(2) : undefined,
-    }));
-
-    // Shift context (current week's cached shifts)
-    const shiftContext = cachedShifts.map(s => ({
-      date: s.date,
-      startTime: s.startTime,
-      endTime: s.endTime,
-      title: s.title,
-      department: s.department?.name,
-      status: s.isOpen ? 'Open' : 'Filled',
-    }));
-
-    // Rule context
-    const ruleContext = rules.map(r => ({
-      name: r.name,
-      description: r.description ?? '',
-      constraintType: r.constraintType,
-      priority: r.priority,
-      weight: r.weight,
-      ruleType: r.ruleType,
-      parameters: r.parameters as Record<string, unknown>,
-      isEnabled: r.isEnabled,
-    }));
-
     try {
       abortRef.current = new AbortController();
       const res = await fetch('/api/copilot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         signal: abortRef.current.signal,
-        body: JSON.stringify({
-          messages: history,
-          rules: ruleContext,
-          employees: empContext,
-          shifts: shiftContext,
-          orgName: org?.name ?? 'Your Organization',
-          currentDate: new Date().toISOString().split('T')[0],
-        }),
+        // The server loads the org's rules, staff, and shifts itself.
+        body: JSON.stringify({ messages: history, today: todayISO(), focusDate: currentDate }),
       });
 
       if (!res.ok) {
@@ -130,6 +83,7 @@ export function CopilotPanel() {
 
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
+      let changed = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -143,6 +97,7 @@ export function CopilotPanel() {
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) throw new Error(parsed.error);
+            if (parsed.changed) changed = true;
             if (parsed.tool_action) appendStreamChunk(convId, aiMsgId, `\n_${parsed.tool_action}_\n`);
             if (parsed.text) appendStreamChunk(convId, aiMsgId, parsed.text);
           } catch (e: any) {
@@ -152,6 +107,7 @@ export function CopilotPanel() {
       }
 
       finishStreaming(convId, aiMsgId);
+      if (changed) onScheduleChanged?.();
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         finishStreaming(convId, aiMsgId);
@@ -183,10 +139,10 @@ export function CopilotPanel() {
         <div className="flex-1">
           <p className="text-sm font-bold text-white leading-none">AI Copilot</p>
           <p className="text-[10px] text-white/70 mt-0.5">
-            Powered by Claude · {rules.filter(r => r.isEnabled).length} active rule{rules.filter(r => r.isEnabled).length !== 1 ? 's' : ''}
+            Powered by Claude · follows your scheduling rules
           </p>
         </div>
-        <button onClick={toggleCopilot} className="p-1 rounded-lg text-white/70 hover:bg-white/10 hover:text-white transition-colors">
+        <button onClick={toggleCopilot} aria-label="Close Copilot" className="p-1 rounded-lg text-white/70 hover:bg-white/10 hover:text-white transition-colors">
           <X size={16} />
         </button>
       </div>
@@ -213,10 +169,10 @@ export function CopilotPanel() {
               </div>
               <h3 className="text-sm font-bold text-gray-900">TimeSync Copilot</h3>
               <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                Ask me to generate schedules, find coverage, explain rule conflicts, or analyze labor costs.
+                Ask me to fill open shifts, find coverage, or explain why someone can't work a shift.
               </p>
               <p className="text-[10px] text-indigo-600 mt-1.5 font-medium">
-                Knows your {employees.length} employees, {cachedShifts.length} shifts, and {rules.filter(r=>r.isEnabled).length} active rules
+                Reads your live staff, shifts, and rules — and won&apos;t break a hard rule.
               </p>
             </div>
             <div>

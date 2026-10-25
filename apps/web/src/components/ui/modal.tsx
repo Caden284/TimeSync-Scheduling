@@ -20,13 +20,13 @@ export function Modal({ title, subtitle, onClose, children, footer, size = 'md' 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className={cn('bg-white rounded-2xl shadow-2xl w-full flex flex-col max-h-[90vh]', widths[size])}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={cn('bg-white rounded-2xl shadow-2xl w-full flex flex-col max-h-[90vh]', widths[size])}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h2 className="text-base font-bold text-gray-900">{title}</h2>
             {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+          <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <X size={16} />
           </button>
         </div>

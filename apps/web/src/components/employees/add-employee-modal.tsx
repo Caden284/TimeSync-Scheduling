@@ -6,13 +6,13 @@ import { Button } from '@/components/ui/button';
 import { UserPlus } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 import { createEmployee } from '@/lib/db';
-import { loadSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
 
 interface Props { onClose: () => void; onSaved: (emp: any) => void; }
 
 export function AddEmployeeModal({ onClose, onSaved }: Props) {
   const { profile } = useAuth();
-  const setup = loadSetup();
+  const { departments } = useOrgData();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
@@ -25,12 +25,13 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
     if (!form.firstName || !form.lastName) { setError('First and last name are required.'); return; }
     setSaving(true); setError('');
     try {
-      const orgId = profile?.orgId ?? 'local';
-      const dept = setup?.departments.find(d => d.id === form.departmentId);
+      if (!profile?.orgId) throw new Error('Not signed in.');
+      const orgId = profile.orgId;
+      const dept = departments.find(d => d.id === form.departmentId);
       const doc = await createEmployee(orgId, {
         firstName: form.firstName, lastName: form.lastName, email: form.email,
         phone: form.phone,
-        role: form.role, departmentId: form.departmentId,
+        role: form.role, departmentId: dept?.id, departmentName: dept?.name,
         employmentType: form.employmentType,
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,
       });
@@ -73,7 +74,7 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
         <div><label className={labelCls}>Department</label>
           <select value={form.departmentId} onChange={e => set('departmentId', e.target.value)} className={inputCls}>
             <option value="">No department</option>
-            {setup?.departments.filter(d => d.name).map(d => (
+            {departments.map(d => (
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}
           </select>

@@ -9,13 +9,13 @@ interface AuthState {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<UserProfile | null>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState>({
   user: null, profile: null, loading: true,
-  login: async () => {}, logout: async () => {},
+  login: async () => null, logout: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(email: string, password: string) {
     const result = await signIn(email, password);
     if (result) { setUser(result.session); setProfile(result.profile); }
+    return result?.profile ?? null;
   }
 
   async function logout() {

@@ -5,7 +5,7 @@ import { X, Save, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn, formatTime } from '@/lib/utils';
 import type { Shift } from '@/types';
-import { mockDepartments, mockRoles, mockLocations } from '@/lib/mock-data';
+import { useOrgData } from '@/lib/org-data';
 
 interface EditShiftModalProps {
   shift: Shift;
@@ -16,15 +16,17 @@ interface EditShiftModalProps {
 }
 
 export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditShiftModalProps) {
+  const { departments, locations } = useOrgData();
   const [form, setForm] = useState({
     title:        shift.title ?? '',
     date:         shift.date,
     startTime:    shift.startTime.slice(0, 5),   // "07:00"
     endTime:      shift.endTime.slice(0, 5),
     departmentId: shift.departmentId ?? '',
-    roleId:       shift.roleId ?? '',
     locationId:   shift.locationId ?? '',
     minStaff:     String(shift.minStaff),
+    maxStaff:     shift.maxStaff ? String(shift.maxStaff) : '',
+    shiftType:    shift.shiftType,
     notes:        shift.notes ?? '',
     color:        shift.color ?? '#6366f1',
   });
@@ -34,18 +36,24 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
   }
 
   function handleSave() {
+    const dept = departments.find(d => d.id === form.departmentId);
+    const loc  = locations.find(l => l.id === form.locationId);
     onSave({
-      title:        form.title || undefined,
-      date:         form.date,
-      startTime:    form.startTime + ':00',
-      endTime:      form.endTime + ':00',
-      departmentId: form.departmentId || undefined,
-      roleId:       form.roleId || undefined,
-      locationId:   form.locationId || undefined,
-      minStaff:     Number(form.minStaff),
-      notes:        form.notes || undefined,
-      color:        form.color,
-    });
+      title:           form.title || undefined,
+      date:            form.date,
+      startTime:       form.startTime + ':00',
+      endTime:         form.endTime + ':00',
+      departmentId:    dept?.id,
+      departmentName:  dept?.name,
+      departmentColor: dept?.color,
+      locationId:      loc?.id,
+      locationName:    loc?.name,
+      shiftType:       form.shiftType,
+      minStaff:        Math.max(1, Number(form.minStaff) || 1),
+      maxStaff:        form.maxStaff ? Number(form.maxStaff) : undefined,
+      notes:           form.notes || undefined,
+      color:           form.color,
+    } as Partial<Shift>);
     onClose();
   }
 
@@ -70,7 +78,7 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
             {shift.date} · {formatTime(shift.startTime)} – {formatTime(shift.endTime)}
             {shift.assignments.length > 0 && (
               <span className="block mt-1 text-amber-600 font-medium">
-                ⚠️ This shift has {shift.assignments.length} employee{shift.assignments.length > 1 ? 's' : ''} assigned — they will be notified.
+                ⚠️ This shift has {shift.assignments.length} employee{shift.assignments.length > 1 ? 's' : ''} assigned — they'll be notified if this week is published.
               </span>
             )}
           </p>
@@ -92,7 +100,7 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-bold text-gray-900">Edit Shift</h2>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+          <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -118,33 +126,36 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
             </FormField>
           </div>
 
-          {/* Dept + Role */}
+          {/* Department + Location */}
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Department">
               <select value={form.departmentId} onChange={e => update('departmentId', e.target.value)} className={inputCls}>
-                <option value="">Select department</option>
-                {mockDepartments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                <option value="">No department</option>
+                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </FormField>
-            <FormField label="Role">
-              <select value={form.roleId} onChange={e => update('roleId', e.target.value)} className={inputCls}>
-                <option value="">Select role</option>
-                {mockRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            <FormField label="Location">
+              <select value={form.locationId} onChange={e => update('locationId', e.target.value)} className={inputCls}>
+                <option value="">No location</option>
+                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </FormField>
           </div>
 
-          {/* Location + Min Staff */}
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Location">
-              <select value={form.locationId} onChange={e => update('locationId', e.target.value)} className={inputCls}>
-                <option value="">Select location</option>
-                {mockLocations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </FormField>
-            <FormField label="Min Staff Required">
-              <input type="number" min="1" max="50" value={form.minStaff}
+          {/* Staffing + Type */}
+          <div className="grid grid-cols-3 gap-3">
+            <FormField label="Min Staff">
+              <input type="number" min="1" max="500" value={form.minStaff}
                 onChange={e => update('minStaff', e.target.value)} className={inputCls} />
+            </FormField>
+            <FormField label="Max Staff">
+              <input type="number" min="1" max="500" value={form.maxStaff} placeholder="No limit"
+                onChange={e => update('maxStaff', e.target.value)} className={inputCls} />
+            </FormField>
+            <FormField label="Type">
+              <select value={form.shiftType} onChange={e => update('shiftType', e.target.value)} className={inputCls}>
+                {['fixed', 'overnight', 'split', 'oncall'].map(t => <option key={t} value={t}>{t === 'oncall' ? 'On-call' : t[0].toUpperCase() + t.slice(1)}</option>)}
+              </select>
             </FormField>
           </div>
 

@@ -28,8 +28,8 @@ export default function LoginPage() {
     setError('');
     setSubmitting(true);
     try {
-      await login(email, password);
-      router.replace('/schedule');
+      const signedIn = await login(email, password);
+      router.replace(signedIn?.role === 'staff' ? '/my-schedule' : '/schedule');
     } catch (err: any) {
       setError(err?.message ?? 'Invalid email or password.');
     } finally {

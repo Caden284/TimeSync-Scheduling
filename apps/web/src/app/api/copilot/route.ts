@@ -1,115 +1,168 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest } from 'next/server';
 import { requireCaller, jsonError, type Caller } from '@/lib/supabase-server';
+import { addDaysISO, weekRange } from '@/lib/dates';
+import {
+  checkAssignment, worstSeverity, staffTarget, shiftHours, weekHours, isRuleEnforced, ruleValue, RULE_PARAMS,
+  type EngineContext, type EngineEmployee, type EngineShift, type EngineRule,
+} from '@/lib/rule-engine';
 
 export const runtime = 'nodejs';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Tool implementations ──────────────────────────────────────────────────────
-// Every tool runs as the signed-in caller, scoped to the caller's organization,
-// so Row Level Security applies: staff can read but writes require an admin.
+// ── Loading the caller's data (runs as the caller, so RLS applies) ───────────
 
-async function toolListUnassignedShifts(caller: Caller, { weekStart, weekEnd }: { weekStart?: string; weekEnd?: string }) {
-  let q = caller.client.from('shifts')
-    .select('id, date, start_time, end_time, title, department_name')
-    .eq('org_id', caller.orgId).eq('is_open', true);
-  if (weekStart) q = q.gte('date', weekStart);
-  if (weekEnd)   q = q.lte('date', weekEnd);
-  const { data, error } = await q.order('date').limit(100);
+const toShift = (r: any): EngineShift => ({
+  id: r.id, date: r.date, startTime: r.start_time, endTime: r.end_time, title: r.title,
+  departmentId: r.department_id, locationId: r.location_id, minStaff: r.min_staff, maxStaff: r.max_staff,
+  assignedEmployeeIds: r.assigned_employee_ids ?? [], assignedEmployeeNames: r.assigned_employee_names ?? [],
+});
+
+const toEmployee = (r: any): EngineEmployee & { departmentName?: string; employmentType?: string } => ({
+  id: r.id, firstName: r.first_name, lastName: r.last_name, role: r.role, isActive: r.is_active,
+  weeklyAvailability: r.weekly_availability, departmentName: r.department_name, employmentType: r.employment_type,
+});
+
+const toRule = (r: any): EngineRule & { description: string; priority: number } => ({
+  name: r.name, ruleType: r.rule_type, constraintType: r.constraint_type, isEnabled: r.is_enabled,
+  parameters: r.parameters, scopeDepts: r.scope_depts, scopeLocations: r.scope_locations, scopeRoles: r.scope_roles,
+  description: r.description, priority: r.priority,
+});
+
+async function q<T = any>(p: PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> {
+  const { data, error } = await p;
   if (error) throw new Error(error.message);
-  return (data ?? []).map(d => ({
-    id: d.id, date: d.date, startTime: d.start_time, endTime: d.end_time,
-    title: d.title ?? 'Shift', department: d.department_name,
-  }));
+  return data as T;
 }
 
-async function toolListEmployeesWithAvailability(caller: Caller) {
-  const { data, error } = await caller.client.from('employees')
-    .select('id, first_name, last_name, role, department_name, employment_type, weekly_availability')
-    .eq('org_id', caller.orgId).eq('is_active', true).limit(200);
-  if (error) throw new Error(error.message);
-  return (data ?? []).map(d => {
-    const avail: Record<string, any> = d.weekly_availability ?? {};
-    const availSummary = Object.entries(avail)
-      .filter(([, v]: any) => v?.start)
-      .map(([k, v]: any) => `${k}: ${v.start}–${v.end}`)
-      .join(', ');
-    return {
-      id: d.id,
-      name: `${d.first_name} ${d.last_name}`,
-      role: d.role,
-      department: d.department_name,
-      employmentType: d.employment_type,
-      availability: availSummary || 'Not set',
-    };
+// Rules engine context for shifts between `from` and `to` (plus a week each side).
+async function loadEngine(caller: Caller, from: string, to: string) {
+  const c = caller.client;
+  const wFrom = addDaysISO(from, -7), wTo = addDaysISO(to, 7);
+  const [shifts, employees, rules, timeOff, overrides] = await Promise.all([
+    q(c.from('shifts').select().eq('org_id', caller.orgId).gte('date', wFrom).lte('date', wTo)),
+    q(c.from('employees').select().eq('org_id', caller.orgId).eq('is_active', true).limit(500)),
+    q(c.from('scheduling_rules').select().eq('org_id', caller.orgId)),
+    q(c.from('time_off_requests').select().eq('org_id', caller.orgId).neq('status', 'denied').lte('start_date', wTo).gte('end_date', wFrom)),
+    q(c.from('availability_overrides').select().eq('org_id', caller.orgId).gte('date', wFrom).lte('date', wTo)),
+  ]);
+  const ctx: EngineContext = {
+    shifts: shifts.map(toShift),
+    rules: rules.map(toRule),
+    timeOff: timeOff.map((t: any) => ({ employeeId: t.employee_id, startDate: t.start_date, endDate: t.end_date, status: t.status, leaveType: t.leave_type })),
+    overrides: overrides.map((o: any) => ({ employeeId: o.employee_id, date: o.date, isAvailable: o.is_available, altStartTime: o.alt_start_time, altEndTime: o.alt_end_time, reason: o.reason })),
+  };
+  return { ctx, employees: employees.map(toEmployee) };
+}
+
+async function getShift(caller: Caller, shiftId: string): Promise<EngineShift> {
+  const row = await q(caller.client.from('shifts').select().eq('id', shiftId).eq('org_id', caller.orgId).maybeSingle());
+  if (!row) throw new Error(`Shift ${shiftId} not found.`);
+  return toShift(row);
+}
+
+async function writeAssignments(caller: Caller, shift: EngineShift, ids: string[], names: string[]) {
+  const isOpen = ids.length < Math.max(1, shift.minStaff ?? 1);
+  await q(caller.client.from('shifts').update({
+    assigned_employee_ids: ids, assigned_employee_names: names,
+    is_open: isOpen, status: isOpen ? 'open' : 'scheduled',
+  }).eq('id', shift.id).eq('org_id', caller.orgId).select('id').single());
+}
+
+const label = (s: EngineShift) => `${s.title || 'Shift'} on ${s.date} ${s.startTime.slice(0, 5)}–${s.endTime.slice(0, 5)}`;
+
+// ── Tools ────────────────────────────────────────────────────────────────────
+
+async function toolListOpenShifts(caller: Caller, { weekStart, weekEnd }: { weekStart?: string; weekEnd?: string }) {
+  let query = caller.client.from('shifts').select().eq('org_id', caller.orgId);
+  if (weekStart) query = query.gte('date', weekStart);
+  if (weekEnd)   query = query.lte('date', weekEnd);
+  const rows = await q(query.order('date').order('start_time').limit(300));
+  const rules = (await q(caller.client.from('scheduling_rules').select().eq('org_id', caller.orgId))).map(toRule);
+  return rows.map(toShift)
+    .filter((s: EngineShift) => s.assignedEmployeeIds.length < staffTarget(s, rules))
+    .slice(0, 100)
+    .map((s: EngineShift) => ({
+      id: s.id, date: s.date, startTime: s.startTime.slice(0, 5), endTime: s.endTime.slice(0, 5), title: s.title ?? 'Shift',
+      assigned: s.assignedEmployeeNames, needs: staffTarget(s, rules) - s.assignedEmployeeIds.length,
+    }));
+}
+
+async function toolListEmployees(caller: Caller) {
+  const rows = await q(caller.client.from('employees').select().eq('org_id', caller.orgId).eq('is_active', true).limit(300));
+  return rows.map(toEmployee).map(e => {
+    const avail = Object.entries(e.weeklyAvailability ?? {})
+      .filter(([, v]) => v?.start).map(([k, v]) => `${k}: ${v!.start}–${v!.end}`).join(', ');
+    return { id: e.id, name: `${e.firstName} ${e.lastName}`, role: e.role, department: e.departmentName, availability: avail || 'Not set' };
   });
 }
 
-async function getOrgShift(caller: Caller, shiftId: string) {
-  const { data, error } = await caller.client.from('shifts')
-    .select('id, date, start_time, end_time, assigned_employee_ids, assigned_employee_names')
-    .eq('id', shiftId).eq('org_id', caller.orgId).maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error(`Shift ${shiftId} not found.`);
-  return data;
+// Every active employee's eligibility for one shift, best first.
+async function toolFindCoverage(caller: Caller, { shiftId }: { shiftId: string }) {
+  const shift = await getShift(caller, shiftId);
+  const { ctx, employees } = await loadEngine(caller, shift.date, shift.date);
+  const ranked = employees
+    .filter(e => !shift.assignedEmployeeIds.includes(e.id))
+    .map(e => {
+      const conflicts = checkAssignment(shift, e, ctx);
+      return {
+        employeeId: e.id, name: `${e.firstName} ${e.lastName}`, status: worstSeverity(conflicts),
+        hoursThisWeek: weekHours(ctx, e.id, shift.date),
+        issues: conflicts.map(c => `${c.severity === 'block' ? 'BLOCKED' : 'warning'}: ${c.message}`),
+      };
+    })
+    .sort((a, b) => ['ok', 'warn', 'block'].indexOf(a.status) - ['ok', 'warn', 'block'].indexOf(b.status) || a.hoursThisWeek - b.hoursThisWeek);
+  return { shift: label(shift), needs: staffTarget(shift, ctx.rules) - shift.assignedEmployeeIds.length, candidates: ranked };
 }
 
-async function toolAssignShift(caller: Caller, { shiftId, employeeId, employeeName }: { shiftId: string; employeeId: string; employeeName: string }) {
-  const shift = await getOrgShift(caller, shiftId);
-  const existingIds: string[]   = shift.assigned_employee_ids   ?? [];
-  const existingNames: string[] = shift.assigned_employee_names ?? [];
+async function toolAssignShift(caller: Caller, { shiftId, employeeId }: { shiftId: string; employeeId: string }) {
+  const shift = await getShift(caller, shiftId);
+  const { ctx, employees } = await loadEngine(caller, shift.date, shift.date);
+  const emp = employees.find(e => e.id === employeeId);
+  if (!emp) return { success: false, message: 'Employee not found or inactive.' };
+  const name = `${emp.firstName} ${emp.lastName}`;
 
-  if (existingIds.includes(employeeId)) {
-    return { success: false, message: `${employeeName} is already assigned to this shift.` };
+  // Hard rules are enforced here, not left to the model.
+  const conflicts = checkAssignment(shift, emp, ctx);
+  const blocks = conflicts.filter(c => c.severity === 'block');
+  if (blocks.length) {
+    return { success: false, message: `Cannot assign ${name}: ${blocks.map(c => c.message).join(' ')}` };
   }
-
-  const { error } = await caller.client.from('shifts').update({
-    is_open: false,
-    assigned_employee_ids:   [...existingIds, employeeId],
-    assigned_employee_names: [...existingNames, employeeName],
-    status: 'scheduled',
-  }).eq('id', shiftId).eq('org_id', caller.orgId).select('id').single();
-  if (error) throw new Error(error.message);
-  return { success: true, message: `Assigned ${employeeName} to shift on ${shift.date} (${shift.start_time}–${shift.end_time}).` };
+  await writeAssignments(caller, shift, [...shift.assignedEmployeeIds, emp.id], [...(shift.assignedEmployeeNames ?? []), name]);
+  const warnings = conflicts.map(c => c.message);
+  return {
+    success: true, changed: true,
+    message: `Assigned ${name} to ${label(shift)}.${warnings.length ? ` Warnings: ${warnings.join(' ')}` : ''}`,
+  };
 }
 
 async function toolCreateShift(caller: Caller, { date, startTime, endTime, title, departmentName, minStaff }: {
-  date: string; startTime: string; endTime: string;
-  title?: string; departmentName?: string; minStaff?: number;
+  date: string; startTime: string; endTime: string; title?: string; departmentName?: string; minStaff?: number;
 }) {
-  const { data, error } = await caller.client.from('shifts').insert({
+  const row = await q<{ id: string }>(caller.client.from('shifts').insert({
     org_id: caller.orgId, date, start_time: startTime, end_time: endTime,
-    title: title ?? 'Shift',
-    department_name: departmentName ?? null,
-    shift_type: 'fixed', status: 'scheduled', is_open: true,
-    min_staff: minStaff ?? 1,
-  }).select('id').single();
-  if (error) throw new Error(error.message);
-  return { id: data.id, date, startTime, endTime, title: title ?? 'Shift' };
+    title: title ?? 'Shift', department_name: departmentName ?? null,
+    shift_type: 'fixed', status: 'open', is_open: true, min_staff: minStaff ?? 1,
+  }).select('id').single());
+  return { success: true, changed: true, id: row.id, date, startTime, endTime, title: title ?? 'Shift' };
 }
 
 async function toolUnassignShift(caller: Caller, { shiftId, employeeId }: { shiftId: string; employeeId: string }) {
-  const shift = await getOrgShift(caller, shiftId);
-  const ids:   string[] = (shift.assigned_employee_ids   ?? []).filter((id: string) => id !== employeeId);
-  const names: string[] = (shift.assigned_employee_names ?? []);
-  // Remove the employee at the matching index
-  const idx = (shift.assigned_employee_ids ?? []).indexOf(employeeId);
-  if (idx >= 0) names.splice(idx, 1);
-
-  const { error } = await caller.client.from('shifts')
-    .update({ is_open: ids.length === 0, assigned_employee_ids: ids, assigned_employee_names: names })
-    .eq('id', shiftId).eq('org_id', caller.orgId).select('id').single();
-  if (error) throw new Error(error.message);
-  return { success: true, message: `Employee removed from shift ${shiftId}.` };
+  const shift = await getShift(caller, shiftId);
+  const idx = shift.assignedEmployeeIds.indexOf(employeeId);
+  if (idx < 0) return { success: false, message: 'That employee is not on this shift.' };
+  const name = shift.assignedEmployeeNames?.[idx] ?? 'Employee';
+  await writeAssignments(caller, shift,
+    shift.assignedEmployeeIds.filter((_, i) => i !== idx),
+    (shift.assignedEmployeeNames ?? []).filter((_, i) => i !== idx));
+  return { success: true, changed: true, message: `Removed ${name} from ${label(shift)}.` };
 }
-
-// ── Tool definitions for Claude ───────────────────────────────────────────────
 
 const TOOLS: Anthropic.Tool[] = [
   {
-    name: 'list_unassigned_shifts',
-    description: 'Returns all open/unfilled shifts for the organization. Optionally filter by date range.',
+    name: 'list_open_shifts',
+    description: 'Lists shifts that still need staff (fewer people than their minimum), optionally within a date range.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -120,30 +173,34 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'list_employees_with_availability',
-    description: 'Returns all active employees with their name, role, department, and weekly availability schedule.',
+    name: 'list_employees',
+    description: 'Lists active employees with their role, department, and weekly availability.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'find_coverage',
+    description: 'For one shift, ranks every employee by eligibility using the organization\'s scheduling rules, time off, availability, and existing shifts. Status "ok" = no issues, "warn" = soft-rule warnings, "block" = cannot be assigned. Call this before assigning.',
     input_schema: {
       type: 'object' as const,
-      properties: {},
-      required: [],
+      properties: { shiftId: { type: 'string' } },
+      required: ['shiftId'],
     },
   },
   {
     name: 'assign_shift',
-    description: 'Assigns an employee to a shift and marks the shift as filled. Use this to actually write assignments to the database.',
+    description: 'Assigns an employee to a shift (writes to the database). Refuses assignments that break a hard rule and reports any soft-rule warnings.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        shiftId:      { type: 'string', description: 'The shift document ID' },
-        employeeId:   { type: 'string', description: 'The employee document ID' },
-        employeeName: { type: 'string', description: 'Full name of the employee for display' },
+        shiftId:    { type: 'string' },
+        employeeId: { type: 'string' },
       },
-      required: ['shiftId', 'employeeId', 'employeeName'],
+      required: ['shiftId', 'employeeId'],
     },
   },
   {
     name: 'create_shift',
-    description: 'Creates a new shift in the database.',
+    description: 'Creates a new unstaffed shift.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -159,7 +216,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'unassign_shift',
-    description: 'Removes an employee assignment from a shift.',
+    description: 'Removes an employee from a shift.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -171,89 +228,78 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-// ── Execute a tool call ───────────────────────────────────────────────────────
-
-async function executeTool(caller: Caller, name: string, input: Record<string, any>): Promise<string> {
+async function executeTool(caller: Caller, name: string, input: Record<string, any>): Promise<{ text: string; changed: boolean }> {
   try {
-    let result: unknown;
-    if      (name === 'list_unassigned_shifts')          result = await toolListUnassignedShifts(caller, input as any);
-    else if (name === 'list_employees_with_availability') result = await toolListEmployeesWithAvailability(caller);
-    else if (name === 'assign_shift')                    result = await toolAssignShift(caller, input as any);
-    else if (name === 'create_shift')                    result = await toolCreateShift(caller, input as any);
-    else if (name === 'unassign_shift')                  result = await toolUnassignShift(caller, input as any);
+    let result: any;
+    if      (name === 'list_open_shifts') result = await toolListOpenShifts(caller, input);
+    else if (name === 'list_employees')   result = await toolListEmployees(caller);
+    else if (name === 'find_coverage')    result = await toolFindCoverage(caller, input as any);
+    else if (name === 'assign_shift')     result = await toolAssignShift(caller, input as any);
+    else if (name === 'create_shift')     result = await toolCreateShift(caller, input as any);
+    else if (name === 'unassign_shift')   result = await toolUnassignShift(caller, input as any);
     else result = { error: `Unknown tool: ${name}` };
-    return JSON.stringify(result);
+    return { text: JSON.stringify(result), changed: !!result?.changed };
   } catch (e: any) {
-    return JSON.stringify({ error: e?.message ?? 'Tool execution failed' });
+    return { text: JSON.stringify({ error: e?.message ?? 'Tool execution failed' }), changed: false };
   }
 }
 
-// ── System prompt ─────────────────────────────────────────────────────────────
+// ── System prompt (from the database, not the browser) ───────────────────────
 
-interface RuleContext {
-  name: string; description: string; constraintType: 'hard' | 'soft';
-  priority: number; weight?: number; ruleType: string;
-  parameters?: Record<string, unknown>; isEnabled: boolean;
+async function buildSystemPrompt(caller: Caller, today: string, focusDate: string): Promise<string> {
+  const week = weekRange(focusDate);
+  const c = caller.client;
+  const [org, ruleRows, empRows, shiftRows] = await Promise.all([
+    q<{ name: string } | null>(c.from('organizations').select('name').eq('id', caller.orgId).maybeSingle()),
+    q(c.from('scheduling_rules').select().eq('org_id', caller.orgId).eq('is_enabled', true).order('priority')),
+    q(c.from('employees').select().eq('org_id', caller.orgId).eq('is_active', true).limit(200)),
+    q(c.from('shifts').select().eq('org_id', caller.orgId).gte('date', week.start).lte('date', week.end).order('date').order('start_time')),
+  ]);
+  const rules = ruleRows.map(toRule);
+  const describe = (r: ReturnType<typeof toRule>) => {
+    const meta = RULE_PARAMS[r.ruleType];
+    const value = meta ? ` (${meta.label}: ${ruleValue(r)} ${meta.unit})` : '';
+    const enforced = isRuleEnforced(r.ruleType) ? '' : ' [not automatically checked]';
+    return `- **${r.name}**${value}: ${r.description}${enforced}`;
+  };
+  const hard = rules.filter(r => r.constraintType === 'hard');
+  const soft = rules.filter(r => r.constraintType === 'soft');
+  const shifts = shiftRows.map(toShift);
+
+  return `You are TimeSync AI Copilot, a workforce scheduling assistant for **${org?.name ?? 'this organization'}**.
+Today's date: ${today}. The user is looking at the week of ${week.start} to ${week.end}.
+
+## ACTIVE SCHEDULING RULES
+Hard rules (assignments that break these are refused by the system):
+${hard.map(describe).join('\n') || '(none)'}
+Soft rules (avoid breaking; the system reports warnings):
+${soft.map(describe).join('\n') || '(none)'}
+Approved time off and double-booking always block an assignment.
+
+## EMPLOYEES (${empRows.length})
+${empRows.map(toEmployee).map(e => `- ${e.firstName} ${e.lastName}${e.role ? ` | ${e.role}` : ''}${e.departmentName ? ` | ${e.departmentName}` : ''}${e.employmentType ? ` | ${e.employmentType.replace('_', '-')}` : ''}`).join('\n') || '(none yet)'}
+
+## SHIFTS THIS WEEK (${shifts.length})
+${shifts.slice(0, 60).map(s => `- ${s.date} ${s.startTime.slice(0, 5)}–${s.endTime.slice(0, 5)} (${shiftHours(s)}h) | ${s.title ?? 'Shift'} | ${s.assignedEmployeeNames?.join(', ') || 'unstaffed'} | needs ${Math.max(0, staffTarget(s, rules) - s.assignedEmployeeIds.length)} more`).join('\n') || '(none)'}${shifts.length > 60 ? `\n…and ${shifts.length - 60} more` : ''}
+
+## TOOLS
+Use the tools to read and change the schedule. To staff a shift, call find_coverage first and pick an "ok" candidate (fewest hours this week) before considering "warn" ones; never try "block" candidates. When asked to assign shifts, actually do it with assign_shift rather than only suggesting.
+
+## RESPONSE STYLE
+- Be concise and professional.
+- Report assignments as: **[Date] [Start–End]: [Shift] → [Employee]**
+- If a shift can't be filled without breaking a hard rule, say which rule and why.`;
 }
+
+// ── POST handler ─────────────────────────────────────────────────────────────
 
 interface RequestBody {
-  messages:   { role: 'user' | 'assistant'; content: string }[];
-  rules?:     RuleContext[];
-  employees?: { name: string; role?: string; department?: string; employmentType?: string; payRate?: string }[];
-  shifts?:    { date: string; startTime: string; endTime: string; title?: string; department?: string; status: string }[];
-  orgName?:   string;
-  currentDate?: string;
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  today?: string;
+  focusDate?: string;
 }
 
-function buildSystemPrompt(body: RequestBody): string {
-  const { rules = [], employees = [], shifts = [], orgName = 'Your Organization', currentDate } = body;
-
-  const activeRules = rules.filter(r => r.isEnabled);
-  const hardRules   = activeRules.filter(r => r.constraintType === 'hard');
-  const softRules   = activeRules.filter(r => r.constraintType === 'soft');
-
-  const rulesSection = activeRules.length > 0 ? `
-## ACTIVE SCHEDULING RULES
-### Hard Constraints (MUST NEVER be violated):
-${hardRules.map((r, i) => `${i+1}. **${r.name}** (P${r.priority}): ${r.description}`).join('\n') || '(none)'}
-
-### Soft Constraints (optimize, may trade off):
-${softRules.map((r, i) => `${i+1}. **${r.name}** (${r.weight !== undefined ? `${(r.weight*100).toFixed(0)}%` : '—'}, P${r.priority}): ${r.description}`).join('\n') || '(none)'}
-` : '';
-
-  const employeesSection = employees.length > 0 ? `
-## EMPLOYEES (${employees.length})
-${employees.map(e => `- ${e.name}${e.role ? ` | ${e.role}` : ''}${e.department ? ` | ${e.department}` : ''}${e.employmentType ? ` | ${e.employmentType.replace('_','-')}` : ''}`).join('\n')}
-` : '';
-
-  const shiftsSection = shifts.length > 0 ? `
-## CURRENT SCHEDULE (${shifts.length} shifts)
-${shifts.slice(0,40).map(s => `- ${s.date} ${s.startTime?.slice(0,5)}–${s.endTime?.slice(0,5)} | ${s.title ?? 'Shift'}${s.department ? ` | ${s.department}` : ''} | ${s.status}`).join('\n')}${shifts.length > 40 ? `\n…and ${shifts.length-40} more` : ''}
-` : '';
-
-  const toolNote = `
-## TOOLS
-You have tools to READ and WRITE this organization's database directly:
-- **list_unassigned_shifts()** — get all open shifts
-- **list_employees_with_availability()** — get employees + their availability
-- **assign_shift(shiftId, employeeId, employeeName)** — assign an employee (WRITES to database)
-- **create_shift(date, startTime, endTime, ...)** — create a new shift
-- **unassign_shift(shiftId, employeeId)** — remove an assignment
-
-When the user asks you to assign shifts, actually DO it — call the tools. Don't just suggest.
-`;
-
-  return `You are TimeSync AI Copilot, an expert workforce scheduling assistant for **${orgName}**.
-Today's date: ${currentDate ?? new Date().toISOString().split('T')[0]}
-${rulesSection}${employeesSection}${shiftsSection}${toolNote}
-## RESPONSE STYLE
-- Be concise and professional
-- Format shift suggestions as: **[Date] [Start–End]: [Title] → [Employee]**
-- When you use tools to make assignments, report what you did clearly
-- If a hard constraint can't be satisfied, say so explicitly`;
-}
-
-// ── POST handler ──────────────────────────────────────────────────────────────
+const isISODate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 export async function POST(req: NextRequest) {
   let caller: Caller;
@@ -264,33 +310,41 @@ export async function POST(req: NextRequest) {
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return new Response(
-      JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured.' }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
-    );
+    return Response.json({ error: 'ANTHROPIC_API_KEY not configured.' }, { status: 503 });
   }
 
-  const body: RequestBody = await req.json();
-  const { messages } = body;
-  if (!messages?.length) {
-    return new Response(JSON.stringify({ error: 'No messages' }), { status: 400 });
+  const body: RequestBody = await req.json().catch(() => ({ messages: [] }));
+  const messages = (body.messages ?? []).filter(m => (m.role === 'user' || m.role === 'assistant') && m.content?.trim());
+  if (!messages.length) return Response.json({ error: 'No messages' }, { status: 400 });
+
+  const today = isISODate(body.today) ? body.today : new Date().toISOString().slice(0, 10);
+  const focusDate = isISODate(body.focusDate) ? body.focusDate : today;
+
+  let systemPrompt: string;
+  try {
+    systemPrompt = await buildSystemPrompt(caller, today, focusDate);
+  } catch (e) {
+    return jsonError(e);
   }
 
-  const systemPrompt = buildSystemPrompt(body);
   const encoder = new TextEncoder();
-
   const stream = new ReadableStream({
     async start(controller) {
       const send = (obj: object) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      const sendText = async (text: string) => {
+        const words = text.split(' ');
+        for (let i = 0; i < words.length; i += 3) {
+          send({ text: words.slice(i, i + 3).join(' ') + (i + 3 < words.length ? ' ' : '') });
+          await new Promise(r => setTimeout(r, 8));
+        }
+      };
 
       try {
-        // Agentic loop — run up to 6 rounds of tool calls
         let claudeMessages: Anthropic.MessageParam[] = messages.map(m => ({ role: m.role, content: m.content }));
-        let round = 0;
-        const MAX_ROUNDS = 6;
+        const MAX_ROUNDS = 8;
+        let answered = false;
 
-        while (round < MAX_ROUNDS) {
-          round++;
+        for (let round = 1; round <= MAX_ROUNDS; round++) {
           const response = await anthropic.messages.create({
             model: 'claude-sonnet-4-6',
             max_tokens: 4096,
@@ -299,43 +353,39 @@ export async function POST(req: NextRequest) {
             messages: claudeMessages,
           });
 
-          const toolUseBlocks = response.content.filter(b => b.type === 'tool_use') as Anthropic.ToolUseBlock[];
+          // Show any text Claude wrote, including text alongside tool calls.
+          for (const block of response.content) {
+            if (block.type === 'text' && block.text.trim()) { await sendText(block.text + '\n'); answered = true; }
+          }
 
-          // If no tool calls, stream the text and exit
-          if (toolUseBlocks.length === 0 || (response.stop_reason as string) === 'end_turn') {
-            const textBlocks = response.content.filter(b => b.type === 'text') as Anthropic.TextBlock[];
-            for (const tb of textBlocks) {
-              // Stream text in chunks for a live feel
-              const words = tb.text.split(' ');
-              for (let i = 0; i < words.length; i += 3) {
-                send({ text: words.slice(i, i+3).join(' ') + (i+3 < words.length ? ' ' : '') });
-                await new Promise(r => setTimeout(r, 8));
-              }
-            }
+          if (response.stop_reason === 'refusal') {
+            if (!answered) await sendText("I can't help with that request.");
+            answered = true;
+            break;
+          }
+          const toolUses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+          if (response.stop_reason !== 'tool_use' || toolUses.length === 0) {
+            if (response.stop_reason === 'max_tokens') await sendText('\n_(Response was cut short — ask me to continue.)_');
             break;
           }
 
-          // Notify client which tools are being called
-          for (const tb of toolUseBlocks) {
+          const results: Anthropic.ToolResultBlockParam[] = [];
+          for (const tb of toolUses) {
             send({ tool_action: `Using ${tb.name.replace(/_/g, ' ')}…` });
+            const { text, changed } = await executeTool(caller, tb.name, tb.input as Record<string, any>);
+            if (changed) send({ changed: true });
+            results.push({ type: 'tool_result', tool_use_id: tb.id, content: text });
           }
-
-          // Execute tool calls
-          const toolResults: Anthropic.ToolResultBlockParam[] = [];
-          for (const tb of toolUseBlocks) {
-            const result = await executeTool(caller, tb.name, tb.input as Record<string, any>);
-            send({ tool_action: `✓ ${tb.name.replace(/_/g, ' ')} completed` });
-            toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
-          }
-
-          // Append assistant turn + tool results to messages
           claudeMessages = [
             ...claudeMessages,
             { role: 'assistant', content: response.content },
-            { role: 'user',      content: toolResults },
+            { role: 'user', content: results },
           ];
 
-          if ((response.stop_reason as string) === 'end_turn') break;
+          if (round === MAX_ROUNDS) {
+            await sendText('\nI reached my step limit for one request. Ask me to continue and I\'ll pick up where I left off.');
+            answered = true;
+          }
         }
 
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
@@ -348,10 +398,6 @@ export async function POST(req: NextRequest) {
   });
 
   return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
   });
 }

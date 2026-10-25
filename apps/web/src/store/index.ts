@@ -7,6 +7,8 @@ import type {
   CopilotConversation, CopilotMessage, Organization,
   UUID, ISODate, GenerationJob,
 } from '@/types';
+import { addDays, addMonths } from 'date-fns';
+import { todayISO, toISODate, parseISODate } from '@/lib/dates';
 
 // ============================================================
 // CALENDAR STORE
@@ -29,21 +31,18 @@ interface CalendarStore extends CalendarState {
 }
 
 function navigateDate(date: ISODate, view: CalendarView, direction: 'prev' | 'next'): ISODate {
-  const d = new Date(date + 'T00:00:00');
+  const d = parseISODate(date);
   const delta = direction === 'next' ? 1 : -1;
-  const steps: Record<CalendarView, number> = {
-    day: 1, week: 7, month: 30, timeline: 7,
-    department: 7, role: 7, location: 7, staff_timeline: 1,
-  };
-  d.setDate(d.getDate() + delta * (steps[view] ?? 7));
-  return d.toISOString().split('T')[0];
+  if (view === 'month') return toISODate(addMonths(d, delta));
+  const days = view === 'day' || view === 'staff_timeline' ? 1 : 7;
+  return toISODate(addDays(d, delta * days));
 }
 
 export const useCalendarStore = create<CalendarStore>()(
   devtools(
     immer((set, get) => ({
       view: 'week',
-      currentDate: new Date().toISOString().split('T')[0],
+      currentDate: todayISO(),
       selectedShiftIds: [],
       showWeekends: true,
       showCoverageOverlay: false,
@@ -56,7 +55,7 @@ export const useCalendarStore = create<CalendarStore>()(
 
       navigate: (direction) => set((s) => {
         if (direction === 'today') {
-          s.currentDate = new Date().toISOString().split('T')[0];
+          s.currentDate = todayISO();
         } else {
           s.currentDate = navigateDate(s.currentDate, s.view, direction);
         }

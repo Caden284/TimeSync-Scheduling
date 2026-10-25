@@ -2,11 +2,10 @@
 
 import { cn, getContrastColor } from '@/lib/utils';
 import { useAppStore } from '@/store';
-import { loadSetup, clearSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
 import { useAuth } from '@/context/auth-context';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import {
   Calendar, Users, ShieldCheck, BarChart3, MessageSquareMore,
   Settings, ChevronLeft, ChevronRight, Zap, Clock, FileText,
@@ -30,29 +29,17 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { profile, logout } = useAuth();
-  const [orgName, setOrgName] = useState('TimeSync');
-  const [orgColor, setOrgColor] = useState('#6366f1');
-  const [orgInitials, setOrgInitials] = useState('TS');
-
-  useEffect(() => {
-    const setup = loadSetup();
-    if (setup) {
-      setOrgName(setup.org.name);
-      setOrgColor(setup.org.primaryColor);
-      setOrgInitials(setup.org.logoInitials);
-    }
-  }, []);
+  const { org } = useOrgData();
+  const orgName = org?.name ?? 'TimeSync';
+  const orgColor = org?.primaryColor ?? '#6366f1';
+  const orgInitials = org?.logoInitials || orgName.slice(0, 2).toUpperCase();
+  const userInitials = profile
+    ? `${profile.firstName?.[0] ?? ''}${profile.lastName?.[0] ?? ''}` || profile.email?.[0]?.toUpperCase() || '?'
+    : orgInitials[0];
 
   async function handleLogout() {
     await logout();
     router.replace('/login');
-  }
-
-  function handleReset() {
-    if (confirm('Reset TimeSync and start a new organization? All local data will be cleared.')) {
-      clearSetup();
-      router.replace('/onboarding');
-    }
   }
 
   const logoFg = getContrastColor(orgColor);
@@ -128,18 +115,18 @@ export function Sidebar() {
         )}>
           <div className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ backgroundColor: orgColor, color: logoFg }}>
-            {profile ? `${profile.firstName[0]}${profile.lastName[0]}` : (orgInitials[0] ?? '?')}
+            {userInitials}
           </div>
           {!sidebarCollapsed && (
             <div className="overflow-hidden flex-1">
               <p className="text-xs font-medium text-white truncate">
-                {profile ? `${profile.firstName} ${profile.lastName}` : orgName}
+                {profile ? `${profile.firstName} ${profile.lastName}`.trim() || profile.email : orgName}
               </p>
               <p className="text-[10px] text-gray-500 truncate capitalize">{profile?.role ?? 'Administrator'}</p>
             </div>
           )}
           {!sidebarCollapsed && (
-            <button onClick={handleLogout} title="Sign out"
+            <button onClick={handleLogout} title="Sign out" aria-label="Sign out"
               className="text-gray-600 hover:text-red-400 transition-colors">
               <LogOut size={14} />
             </button>
@@ -150,6 +137,7 @@ export function Sidebar() {
       {/* Collapse toggle */}
       <button
         onClick={toggleSidebar}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         className="absolute -right-3 top-20 h-6 w-6 rounded-full border border-gray-700 bg-gray-900 flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 transition-colors shadow-sm"
       >
         {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}

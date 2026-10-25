@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Send } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 import { createTimeOffRequest } from '@/lib/db';
+import { todayISO } from '@/lib/dates';
 
 interface Props { onClose: () => void; onSaved: (req: any) => void; employees?: any[]; }
 
@@ -25,11 +26,13 @@ export function NewRequestModal({ onClose, onSaved, employees = [] }: Props) {
 
   async function handleSave() {
     if (!form.startDate || !form.endDate) { setError('Start and end dates are required.'); return; }
+    if (employees.length > 0 && !form.employeeId) { setError('Choose who the time off is for.'); return; }
     if (!form.employeeName) { setError('Employee name is required.'); return; }
+    if (form.endDate < form.startDate) { setError('The end date is before the start date.'); return; }
     setSaving(true); setError('');
     try {
       const doc = await createTimeOffRequest({
-        orgId: profile?.orgId ?? 'local',
+        orgId: profile?.orgId ?? '',
         employeeId: form.employeeId,
         employeeName: form.employeeName,
         leaveType: form.leaveType,
@@ -37,7 +40,7 @@ export function NewRequestModal({ onClose, onSaved, employees = [] }: Props) {
         endDate: form.endDate,
         reason: form.reason,
       });
-      onSaved({ id: doc.id, ...form, status: 'pending', submittedAt: new Date().toISOString().split('T')[0], hours: 8 });
+      onSaved({ id: doc.id, ...form, status: 'pending', submittedAt: todayISO(), hours: 8 });
       onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Failed to submit request.');

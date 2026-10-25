@@ -1,10 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn, getContrastColor } from '@/lib/utils';
-import { saveSetup, getNextColor } from '@/lib/org-store';
-import type { StaffMember, DeptData, LocationData } from '@/lib/org-store';
+import { AuthGuard } from '@/components/auth/auth-guard';
+import { useAuth } from '@/context/auth-context';
+import { useOrgData } from '@/lib/org-data';
+import { updateOrg, createDepartment, createLocation, createEmployee, completeOnboarding } from '@/lib/db';
+
+// Local form shapes for the wizard (saved to the database on finish).
+interface DeptData { id: string; name: string; color: string }
+interface LocationData { id: string; name: string; city: string; state: string }
+interface StaffMember {
+  id: string; firstName: string; lastName: string; email: string; role: string; department: string;
+  employmentType: 'full_time' | 'part_time' | 'per_diem'; payRate: string; phone: string; color: string;
+}
+
+const PALETTE = ['#6366f1','#ef4444','#f97316','#22c55e','#06b6d4','#8b5cf6','#ec4899','#f59e0b','#14b8a6','#3b82f6'];
+const getNextColor = (i: number) => PALETTE[i % PALETTE.length];
 import {
   Zap, Building2, MapPin, Users, Check, ChevronRight,
   ChevronLeft, Plus, Trash2, Sparkles,
@@ -57,8 +70,16 @@ const STEPS = [
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export default function OnboardingPage() {
+  return <AuthGuard><OnboardingWizard /></AuthGuard>;
+}
+
+function OnboardingWizard() {
   const router = useRouter();
+  const { profile } = useAuth();
+  const { org, departments: existingDepts, locations: existingLocs, refresh } = useOrgData();
   const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   // Step 1 — Org
   const [orgName, setOrgName]       = useState('');
@@ -79,9 +100,21 @@ export default function OnboardingPage() {
     { id: 'emp-1', firstName: '', lastName: '', email: '', role: '', department: '', employmentType: 'full_time', payRate: '', phone: '', color: '#6366f1' },
   ]);
 
+  // Start from the organization created at sign-up.
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (!org || prefilled) return;
+    setOrgName(org.name ?? '');
+    if (org.vertical && VERTICALS.some(v => v.id === org.vertical)) setVertical(org.vertical);
+    if (org.timezone) setTimezone(org.timezone);
+    if (org.primaryColor) setPrimary(org.primaryColor);
+    setPrefilled(true);
+  }, [org, prefilled]);
+
   const canProceed1 = orgName.trim().length >= 2 && vertical !== '';
-  const canProceed2 = departments.some(d => d.name.trim()) && locations.some(l => l.name.trim());
-  const canProceed3 = staff.some(s => s.firstName.trim() && s.lastName.trim());
+  const canProceed2 = (departments.some(d => d.name.trim()) || existingDepts.length > 0)
+                   && (locations.some(l => l.name.trim()) || existingLocs.length > 0);
+  const canProceed3 = true;   // the team can be added later
 
   function addDept() {
     setDepartments(prev => [...prev, { id: `dept-${Date.now()}`, name: '', color: getNextColor(prev.length) }]);
@@ -119,26 +152,44 @@ export default function OnboardingPage() {
     setStaff(prev => prev.map(s => s.id === id ? { ...s, [key]: value } : s));
   }
 
-  function handleFinish() {
-    const filledDepts  = departments.filter(d => d.name.trim());
-    const filledLocs   = locations.filter(l => l.name.trim());
-    const filledStaff  = staff.filter(s => s.firstName.trim() && s.lastName.trim());
-
-    saveSetup({
-      org: {
+  async function handleFinish() {
+    if (!profile?.orgId) return;
+    const orgId = profile.orgId;
+    setSaving(true); setSaveError('');
+    try {
+      await updateOrg(orgId, {
         name: orgName.trim(),
         vertical,
         timezone,
         primaryColor,
-        logoInitials: orgName.trim().split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
-      },
-      departments: filledDepts,
-      locations:   filledLocs,
-      staff:       filledStaff,
-      onboardingComplete: true,
-      createdAt: new Date().toISOString(),
-    });
-    router.push('/schedule');
+        logoInitials: orgName.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+      });
+      const deptIdByName = new Map<string, any>(existingDepts.map(d => [d.name, d]));
+      for (const d of departments.filter(d => d.name.trim())) {
+        if (deptIdByName.has(d.name.trim())) continue;
+        deptIdByName.set(d.name.trim(), await createDepartment(orgId, d.name.trim(), d.color));
+      }
+      const existingLocNames = new Set(existingLocs.map(l => l.name));
+      for (const l of locations.filter(l => l.name.trim() && !existingLocNames.has(l.name.trim()))) {
+        await createLocation(orgId, { name: l.name.trim(), city: l.city || undefined, state: l.state || undefined });
+      }
+      for (const m of staff.filter(m => m.firstName.trim() && m.lastName.trim())) {
+        const dept = deptIdByName.get(m.department);
+        await createEmployee(orgId, {
+          firstName: m.firstName.trim(), lastName: m.lastName.trim(), email: m.email.trim(),
+          phone: m.phone || undefined, role: m.role.trim(),
+          departmentId: dept?.id, departmentName: dept?.name,
+          employmentType: m.employmentType,
+          payRate: m.payRate ? parseFloat(m.payRate) : undefined,
+        });
+      }
+      await completeOnboarding(orgId);
+      await refresh();
+      router.push('/schedule');
+    } catch (e: any) {
+      setSaveError(e?.message ?? 'Saving failed. Please try again.');
+      setSaving(false);
+    }
   }
 
   const logoFg = getContrastColor(primaryColor);
@@ -426,28 +477,28 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
+              {saveError && <p className="mb-4 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{saveError}</p>}
+
               <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-6 flex items-start gap-3">
                 <Sparkles size={16} className="text-indigo-600 mt-0.5 shrink-0" />
                 <p className="text-xs text-indigo-700 leading-relaxed">
-                  <strong>You're all set!</strong> TimeSync will load with your team data. Head to the Schedule page to build your first schedule, or the Employees page to add more detail.
+                  <strong>You&apos;re all set!</strong> This saves your organization, departments, locations, and team. Next, create shifts on the Schedule page and use Auto-Schedule to fill them.
                 </p>
               </div>
 
               <div className="flex justify-between">
                 <Button variant="secondary" size="md" onClick={() => setStep(3)} leftIcon={<ChevronLeft size={14} />}>Back</Button>
-                <Button variant="primary" size="lg" onClick={handleFinish} leftIcon={<Zap size={16} />}>
-                  Launch TimeSync →
+                <Button variant="primary" size="lg" onClick={handleFinish} loading={saving} leftIcon={<Zap size={16} />}>
+                  {saving ? 'Saving…' : 'Launch TimeSync →'}
                 </Button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Skip for demo */}
         <p className="text-center mt-4 text-xs text-white/40">
-          Already have a setup?{' '}
-          <button onClick={() => window.location.href = '/schedule'} className="text-white/60 hover:text-white underline">
-            Go to app →
+          <button onClick={() => router.push('/schedule')} className="text-white/60 hover:text-white underline">
+            Skip for now — finish later
           </button>
         </p>
       </div>

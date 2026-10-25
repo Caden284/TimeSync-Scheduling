@@ -121,11 +121,14 @@ export async function updatePassword(password: string) {
 // Invite a staff or admin user into the caller's organization. Runs on the
 // server (/api/admin/users) because creating another user's account needs the
 // service-role key, and the server re-checks that the caller is an admin.
-export async function inviteUser(email: string, password: string, firstName: string, lastName: string, role: 'admin' | 'staff', employeeId?: string) {
+export async function inviteUser(
+  email: string, password: string, firstName: string, lastName: string, role: 'admin' | 'staff',
+  link: { employeeId?: string; createEmployee?: boolean } = {},
+) {
   const res = await fetch('/api/admin/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-    body: JSON.stringify({ email, password, firstName, lastName, role, employeeId }),
+    body: JSON.stringify({ email, password, firstName, lastName, role, ...link }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error ?? `Failed to create user (${res.status})`);

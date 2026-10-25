@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { Modal, inputCls, labelCls } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Save, Trash2 } from 'lucide-react';
-import { updateEmployee, deleteEmployee, updateEmployeeAvailability } from '@/lib/db';
-import { loadSetup } from '@/lib/org-store';
+import { updateEmployee, deactivateEmployee, updateEmployeeAvailability } from '@/lib/db';
+import { useOrgData } from '@/lib/org-data';
 import { cn } from '@/lib/utils';
 import type { WeeklyAvailability } from '@/types';
 
@@ -34,7 +34,7 @@ function parseAvailability(raw?: Partial<WeeklyAvailability> | null): WeeklyAvai
 }
 
 export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Props) {
-  const setup = loadSetup();
+  const { departments } = useOrgData();
   const [tab, setTab] = useState<'info' | 'availability'>('info');
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -72,14 +72,17 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
     setSaving(true); setError('');
     try {
       const empId = employee.id;
+      const dept = departments.find(d => d.id === form.departmentId);
+      const payRate = form.payRate ? parseFloat(form.payRate) : null;
       await updateEmployee(empId, {
         firstName: form.firstName, lastName: form.lastName, email: form.email,
-        phone: form.phone, role: form.role, departmentId: form.departmentId,
+        phone: form.phone, role: form.role,
+        departmentId: dept?.id ?? null, departmentName: dept?.name ?? null,
         employmentType: form.employmentType,
-        payRate: form.payRate ? parseFloat(form.payRate) : undefined,
+        payRate,
       });
       await updateEmployeeAvailability(empId, avail);
-      onSaved({ ...employee, ...form, payRate: form.payRate ? parseFloat(form.payRate) : undefined, weeklyAvailability: avail });
+      onSaved({ ...employee, ...form, departmentName: dept?.name ?? null, payRate, weeklyAvailability: avail });
       onClose();
     } catch (e: any) { setError(e?.message ?? 'Save failed.'); }
     finally { setSaving(false); }
@@ -88,7 +91,7 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
   async function handleDelete() {
     setSaving(true);
     try {
-      await deleteEmployee(employee.id);
+      await deactivateEmployee(employee.id);
       onDeleted(employee.id);
       onClose();
     } catch (e: any) { setError(e?.message ?? 'Delete failed.'); setSaving(false); }
@@ -102,7 +105,7 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
           {saving ? 'Removing…' : 'Yes, Remove'}
         </Button>
       </>}>
-      <p className="text-sm text-gray-700">Remove <strong>{form.firstName} {form.lastName}</strong> from the system? This will deactivate their account.</p>
+      <p className="text-sm text-gray-700">Remove <strong>{form.firstName} {form.lastName}</strong> from the team? They&apos;ll be taken off any upcoming shifts and won&apos;t appear in scheduling. Past shifts and reports keep their history.</p>
     </Modal>
   );
 
@@ -153,7 +156,7 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
           <div><label className={labelCls}>Department</label>
             <select value={form.departmentId} onChange={e => set('departmentId', e.target.value)} className={inputCls}>
               <option value="">No department</option>
-              {setup?.departments.filter(d => d.name).map(d => (
+              {departments.map(d => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>

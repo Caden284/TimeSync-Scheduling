@@ -220,6 +220,8 @@ export interface Shift {
   role?: Role;
   location?: Location;
   assignments: ShiftAssignment[];
+  assignedEmployeeIds?: UUID[];
+  assignedEmployeeNames?: string[];
   metadata: Record<string, unknown>;
   createdAt: ISODateTime;
 }

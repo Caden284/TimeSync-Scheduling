@@ -9,7 +9,9 @@ import { Modal, inputCls, labelCls } from '@/components/ui/modal';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/context/auth-context';
-import { loadSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
+import { createShifts } from '@/lib/db';
+import { parseISODate, toISODate } from '@/lib/dates';
 import {
   getSeasons, createSeason, updateSeason, deleteSeason,
   getShiftTemplates, createShiftTemplate, updateShiftTemplate, deleteShiftTemplate,
@@ -163,7 +165,7 @@ function SeasonModal({ season, onClose, onSaved }: { season?: Season; onClose: (
 function TemplateModal({ template, seasonId, orgId, onClose, onSaved }: {
   template?: ShiftTemplate; seasonId: string; orgId: string; onClose: () => void; onSaved: (t: ShiftTemplate) => void;
 }) {
-  const setup = loadSetup();
+  const { departments } = useOrgData();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [name, setName] = useState(template?.name ?? '');
@@ -186,7 +188,7 @@ function TemplateModal({ template, seasonId, orgId, onClose, onSaved }: {
     if (daysOfWeek.length === 0) { setError('Select at least one day.'); return; }
     setSaving(true); setError('');
     try {
-      const deptName = setup?.departments.find(d => d.id === departmentId)?.name ?? '';
+      const deptName = departments.find(d => d.id === departmentId)?.name ?? '';
       const payload = { name, startTime, endTime, color, departmentId: departmentId || undefined, departmentName: deptName || undefined, minStaff, daysOfWeek, notes: notes || undefined };
       let saved: ShiftTemplate;
       if (template) {
@@ -247,7 +249,7 @@ function TemplateModal({ template, seasonId, orgId, onClose, onSaved }: {
             <label className={labelCls}>Department</label>
             <select value={departmentId} onChange={e => setDepartmentId(e.target.value)} className={inputCls}>
               <option value="">No department</option>
-              {setup?.departments.filter(d => d.name).map(d => (
+              {departments.map(d => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
@@ -290,27 +292,31 @@ function GenerateModal({ season, templates, orgId, onClose, onGenerated }: {
     if (!startDate || !endDate) return;
     setGenerating(true);
     try {
-      const { createShift } = await import('@/lib/db');
-      const start = new Date(startDate + 'T00:00:00');
-      const end   = new Date(endDate   + 'T00:00:00');
-      let count = 0;
-
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      // Build every shift locally, then insert in one request. Each row carries
+      // its template id, so re-running a range skips shifts that already exist.
+      const rows: Record<string, unknown>[] = [];
+      const end = parseISODate(endDate);
+      for (let d = parseISODate(startDate); d <= end; d.setDate(d.getDate() + 1)) {
         const dow = d.getDay(); // 0=Sun
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = toISODate(d);
         for (const tmpl of templates.filter(t => t.isActive && t.daysOfWeek.includes(dow))) {
-          await createShift({
-            orgId, title: tmpl.name, date: dateStr,
+          rows.push({
+            orgId, templateId: tmpl.id, title: tmpl.name, date: dateStr,
             startTime: tmpl.startTime, endTime: tmpl.endTime,
             departmentId: tmpl.departmentId, departmentName: tmpl.departmentName,
-            departmentColor: tmpl.color, shiftType: 'fixed', status: 'scheduled',
+            departmentColor: tmpl.color, shiftType: 'fixed', status: 'open',
             isOpen: true, minStaff: tmpl.minStaff, color: tmpl.color,
           });
-          count++;
         }
       }
+      const count = await createShifts(rows);
+      const skipped = rows.length - count;
       onGenerated(count);
-      addToast({ type: 'success', title: `Generated ${count} shifts`, message: `${startDate} → ${endDate}` });
+      addToast({
+        type: 'success',
+        title: `Generated ${count} shift${count === 1 ? '' : 's'}`,
+        message: skipped > 0 ? `${skipped} already existed and were skipped.` : `${startDate} → ${endDate}`,
+      });
     } catch (e: any) {
       addToast({ type: 'error', title: 'Generation failed', message: e?.message });
     } finally {

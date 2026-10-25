@@ -13,7 +13,7 @@ import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { NewRequestModal } from '@/components/time-off/new-request-modal';
 import { useAuth } from '@/context/auth-context';
-import { getTimeOffRequests, updateTimeOffStatus } from '@/lib/db';
+import { getTimeOffRequests, updateTimeOffStatus, getEmployees } from '@/lib/db';
 
 interface TimeOffRequest {
   id: string;
@@ -48,6 +48,11 @@ export default function TimeOffPage() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'denied'>('all');
   const [showNewModal, setShowNewModal] = useState(false);
   const [actioning, setActioning] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (profile?.orgId) getEmployees(profile.orgId).then(setEmployees).catch(() => {});
+  }, [profile?.orgId]);
 
   useEffect(() => {
     if (!profile?.orgId) return;
@@ -216,6 +221,7 @@ export default function TimeOffPage() {
 
       {showNewModal && (
         <NewRequestModal
+          employees={employees}
           onClose={() => setShowNewModal(false)}
           onSaved={req => {
             setRequests(prev => [req, ...prev]);

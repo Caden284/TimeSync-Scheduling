@@ -1,57 +1,40 @@
 'use client';
 
-import { useEffect } from 'react';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { AuthGuard } from '@/components/auth/auth-guard';
-import { useAppStore } from '@/store';
-import { mockOrg } from '@/lib/mock-data';
-import { Sparkles, Zap, BarChart3, Calendar, Users, ShieldCheck } from 'lucide-react';
+import { Sparkles, Zap, Calendar, Users, ShieldCheck } from 'lucide-react';
 
+// Only what the Copilot's tools can actually do (see app/api/copilot/route.ts).
 const CAPABILITY_CARDS = [
   {
     icon: <Calendar className="h-5 w-5 text-indigo-600" />,
-    title: 'Schedule Generation',
-    desc: 'Generate complete schedules for any date range, department, or location in seconds.',
-    examples: ["Generate next week's ICU schedule", 'Build a holiday schedule for all departments'],
+    title: 'Fill Open Shifts',
+    desc: 'Assigns available people to understaffed shifts, checking every rule first.',
+    examples: ['Fill all open shifts this week', 'Staff Saturday with whoever has the fewest hours'],
   },
   {
     icon: <Users className="h-5 w-5 text-purple-600" />,
-    title: 'Coverage & Staffing',
-    desc: 'Find coverage for open shifts, identify gaps, and recommend qualified employees.',
-    examples: ['Who can cover Friday night?', 'Find coverage for the ED — 3 callouts today'],
-  },
-  {
-    icon: <BarChart3 className="h-5 w-5 text-blue-600" />,
-    title: 'Analytics & Reporting',
-    desc: 'Get instant reports on labor costs, overtime, utilization, and compliance.',
-    examples: ['Who is closest to overtime this week?', 'Show labor cost by department'],
+    title: 'Find Coverage',
+    desc: 'Ranks who can take a shift, and says exactly why others can\'t.',
+    examples: ['Who can cover Friday night?', 'Who is free Tuesday morning?'],
   },
   {
     icon: <ShieldCheck className="h-5 w-5 text-green-600" />,
-    title: 'Compliance & Rules',
-    desc: 'Check certification status, flag labor law risks, and explain AI decisions.',
-    examples: ['List employees with expiring certs', 'Why was Jordan assigned to Saturday?'],
+    title: 'Rules & Conflicts',
+    desc: 'Explains time-off, availability, rest, and hour-limit conflicts in plain language.',
+    examples: ['Why can\'t Sam work Thursday?', 'Who is close to overtime this week?'],
   },
   {
     icon: <Zap className="h-5 w-5 text-amber-600" />,
-    title: 'Bulk Actions',
-    desc: 'Make sweeping changes to schedules through natural language commands.',
-    examples: ['Swap Marcus and Priya on Thursday', 'Add a second nurse to all Friday day shifts'],
-  },
-  {
-    icon: <Sparkles className="h-5 w-5 text-pink-600" />,
-    title: 'AI Explanations',
-    desc: 'Understand every AI assignment decision with full transparent reasoning.',
-    examples: ['Explain the Monday schedule', 'Why is the ICU understaffed Thursday night?'],
+    title: 'Create & Change Shifts',
+    desc: 'Adds shifts and moves people on or off them by request.',
+    examples: ['Add a 9–1 desk shift on Monday', 'Take Pat off Wednesday\'s evening shift'],
   },
 ];
 
 export default function CopilotPage() {
-  const { setOrg } = useAppStore();
-  useEffect(() => { setOrg(mockOrg); }, []);
-
   return (
     <AuthGuard>
     <div className="flex h-screen overflow-hidden bg-gray-50">
@@ -89,7 +72,7 @@ export default function CopilotPage() {
 
             {/* Capability cards */}
             <h2 className="text-sm font-semibold text-gray-700 mb-3">What Copilot can do</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {CAPABILITY_CARDS.map((card) => (
                 <div
                   key={card.title}
