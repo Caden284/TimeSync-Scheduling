@@ -55,7 +55,7 @@ export default function TimeOffPage() {
     getTimeOffRequests(profile.orgId)
       .then(docs => {
         setRequests(docs.map((d: any) => ({
-          id: d.$id,
+          id: d.id,
           employeeId: d.employeeId,
           employeeName: d.employeeName,
           leaveType: d.leaveType,
@@ -63,7 +63,7 @@ export default function TimeOffPage() {
           endDate: d.endDate,
           reason: d.reason ?? '',
           status: d.status,
-          submittedAt: d.$createdAt?.split('T')[0] ?? '',
+          submittedAt: d.createdAt?.split('T')[0] ?? '',
         })));
       })
       .catch(() => addToast({ type: 'error', title: 'Failed to load time-off requests' }))

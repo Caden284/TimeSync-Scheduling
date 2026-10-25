@@ -2,10 +2,11 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { getCurrentUser, signIn, signOut, UserProfile } from '@/lib/auth';
-import type { Models } from 'appwrite';
+import type { User } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 
 interface AuthState {
-  user: Models.User<Models.Preferences> | null;
+  user: User | null;
   profile: UserProfile | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -18,7 +19,7 @@ const AuthContext = createContext<AuthState>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser]       = useState<Models.User<Models.Preferences> | null>(null);
+  const [user, setUser]       = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -27,6 +28,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (result) { setUser(result.session); setProfile(result.profile); }
       setLoading(false);
     });
+    // Keep state in sync when the session ends elsewhere (other tab, expiry).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(event => {
+      if (event === 'SIGNED_OUT') { setUser(null); setProfile(null); }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   async function login(email: string, password: string) {

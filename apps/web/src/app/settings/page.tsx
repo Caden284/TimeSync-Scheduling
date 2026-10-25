@@ -13,10 +13,8 @@ import {
 } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { inviteUser } from '@/lib/auth';
-import { useAuth } from '@/context/auth-context';
 
 function InviteUserForm() {
-  const { profile } = useAuth();
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', password: '', role: 'staff' });
   const [status, setStatus] = useState<'idle'|'saving'|'done'|'error'>('idle');
   const [errMsg, setErrMsg] = useState('');
@@ -28,7 +26,7 @@ function InviteUserForm() {
     try {
       await inviteUser(
         form.email, form.password, form.firstName, form.lastName,
-        form.role as 'admin' | 'staff', profile?.orgId ?? '',
+        form.role as 'admin' | 'staff',
       );
       setStatus('done');
       setForm({ firstName: '', lastName: '', email: '', password: '', role: 'staff' });

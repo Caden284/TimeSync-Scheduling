@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore, useCopilotStore, useRulesStore } from '@/store';
 import { useAuth } from '@/context/auth-context';
 import { getEmployees, getShifts } from '@/lib/db';
+import { authHeaders } from '@/lib/supabase';
 import { format, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import type { CopilotMessage } from '@/types';
 
@@ -110,15 +111,14 @@ export function CopilotPanel() {
       abortRef.current = new AbortController();
       const res = await fetch('/api/copilot', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         signal: abortRef.current.signal,
         body: JSON.stringify({
           messages: history,
           rules: ruleContext,
           employees: empContext,
           shifts: shiftContext,
-          orgName: org?.name ?? profile?.orgId ?? 'Your Organization',
-          orgId: profile?.orgId,
+          orgName: org?.name ?? 'Your Organization',
           currentDate: new Date().toISOString().split('T')[0],
         }),
       });

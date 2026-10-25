@@ -1,125 +1,106 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest } from 'next/server';
+import { requireCaller, jsonError, type Caller } from '@/lib/supabase-server';
 
 export const runtime = 'nodejs';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const APPWRITE_ENDPOINT  = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT  ?? 'https://nyc.cloud.appwrite.io/v1';
-const APPWRITE_PROJECT   = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID ?? '6a5ac65d000f4a62b039';
-const DATABASE_ID        = 'timesync-db';
-
-// ── Appwrite REST helper (server-side, uses API key) ──────────────────────────
-
-async function aw(path: string, method = 'GET', body?: object) {
-  const apiKey = process.env.APPWRITE_API_KEY;
-  if (!apiKey) throw new Error('APPWRITE_API_KEY not configured.');
-  const res = await fetch(`${APPWRITE_ENDPOINT}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Appwrite-Project': APPWRITE_PROJECT,
-      'X-Appwrite-Key': apiKey,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.message ?? `Appwrite ${res.status}`);
-  return data;
-}
-
-function encodeQueries(queries: string[]) {
-  return queries.map(q => `queries[]=${encodeURIComponent(q)}`).join('&');
-}
-
 // ── Tool implementations ──────────────────────────────────────────────────────
+// Every tool runs as the signed-in caller, scoped to the caller's organization,
+// so Row Level Security applies: staff can read but writes require an admin.
 
-async function toolListUnassignedShifts({ orgId, weekStart, weekEnd }: { orgId: string; weekStart?: string; weekEnd?: string }) {
-  const qs = [
-    `Query.equal("orgId","${orgId}")`,
-    `Query.equal("isOpen","true")`,
-    weekStart ? `Query.greaterThanEqual("date","${weekStart}")` : null,
-    weekEnd   ? `Query.lessThanEqual("date","${weekEnd}")` : null,
-    `Query.limit("100")`,
-  ].filter(Boolean);
-  const data = await aw(`/databases/${DATABASE_ID}/collections/shifts/documents?${encodeQueries(qs as string[])}`);
-  return (data.documents ?? []).map((d: any) => ({
-    id: d.$id, date: d.date, startTime: d.startTime, endTime: d.endTime,
-    title: d.title ?? 'Shift', department: d.departmentName,
+async function toolListUnassignedShifts(caller: Caller, { weekStart, weekEnd }: { weekStart?: string; weekEnd?: string }) {
+  let q = caller.client.from('shifts')
+    .select('id, date, start_time, end_time, title, department_name')
+    .eq('org_id', caller.orgId).eq('is_open', true);
+  if (weekStart) q = q.gte('date', weekStart);
+  if (weekEnd)   q = q.lte('date', weekEnd);
+  const { data, error } = await q.order('date').limit(100);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(d => ({
+    id: d.id, date: d.date, startTime: d.start_time, endTime: d.end_time,
+    title: d.title ?? 'Shift', department: d.department_name,
   }));
 }
 
-async function toolListEmployeesWithAvailability({ orgId }: { orgId: string }) {
-  const qs = [`Query.equal("orgId","${orgId}")`, `Query.equal("isActive","true")`, `Query.limit("200")`];
-  const data = await aw(`/databases/${DATABASE_ID}/collections/employees/documents?${encodeQueries(qs)}`);
-  return (data.documents ?? []).map((d: any) => {
-    let avail: Record<string, any> = {};
-    try { avail = JSON.parse(d.weeklyAvailability ?? '{}'); } catch {}
+async function toolListEmployeesWithAvailability(caller: Caller) {
+  const { data, error } = await caller.client.from('employees')
+    .select('id, first_name, last_name, role, department_name, employment_type, weekly_availability')
+    .eq('org_id', caller.orgId).eq('is_active', true).limit(200);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(d => {
+    const avail: Record<string, any> = d.weekly_availability ?? {};
     const availSummary = Object.entries(avail)
       .filter(([, v]: any) => v?.start)
       .map(([k, v]: any) => `${k}: ${v.start}–${v.end}`)
       .join(', ');
     return {
-      id: d.$id,
-      name: `${d.firstName} ${d.lastName}`,
+      id: d.id,
+      name: `${d.first_name} ${d.last_name}`,
       role: d.role,
-      department: d.departmentName,
-      employmentType: d.employmentType,
+      department: d.department_name,
+      employmentType: d.employment_type,
       availability: availSummary || 'Not set',
     };
   });
 }
 
-async function toolAssignShift({ shiftId, employeeId, employeeName }: { shiftId: string; employeeId: string; employeeName: string }) {
-  // Get current shift to append to existing assignments
-  const shift = await aw(`/databases/${DATABASE_ID}/collections/shifts/documents/${shiftId}`);
-  const existingIds: string[]   = shift.assignedEmployeeIds   ?? [];
-  const existingNames: string[] = shift.assignedEmployeeNames ?? [];
+async function getOrgShift(caller: Caller, shiftId: string) {
+  const { data, error } = await caller.client.from('shifts')
+    .select('id, date, start_time, end_time, assigned_employee_ids, assigned_employee_names')
+    .eq('id', shiftId).eq('org_id', caller.orgId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`Shift ${shiftId} not found.`);
+  return data;
+}
+
+async function toolAssignShift(caller: Caller, { shiftId, employeeId, employeeName }: { shiftId: string; employeeId: string; employeeName: string }) {
+  const shift = await getOrgShift(caller, shiftId);
+  const existingIds: string[]   = shift.assigned_employee_ids   ?? [];
+  const existingNames: string[] = shift.assigned_employee_names ?? [];
 
   if (existingIds.includes(employeeId)) {
     return { success: false, message: `${employeeName} is already assigned to this shift.` };
   }
 
-  await aw(`/databases/${DATABASE_ID}/collections/shifts/documents/${shiftId}`, 'PATCH', {
-    data: {
-      isOpen: false,
-      assignedEmployeeIds:   [...existingIds, employeeId],
-      assignedEmployeeNames: [...existingNames, employeeName],
-      status: 'scheduled',
-    },
-  });
-  return { success: true, message: `Assigned ${employeeName} to shift on ${shift.date} (${shift.startTime}–${shift.endTime}).` };
+  const { error } = await caller.client.from('shifts').update({
+    is_open: false,
+    assigned_employee_ids:   [...existingIds, employeeId],
+    assigned_employee_names: [...existingNames, employeeName],
+    status: 'scheduled',
+  }).eq('id', shiftId).eq('org_id', caller.orgId).select('id').single();
+  if (error) throw new Error(error.message);
+  return { success: true, message: `Assigned ${employeeName} to shift on ${shift.date} (${shift.start_time}–${shift.end_time}).` };
 }
 
-async function toolCreateShift({ orgId, date, startTime, endTime, title, departmentName, minStaff }: {
-  orgId: string; date: string; startTime: string; endTime: string;
+async function toolCreateShift(caller: Caller, { date, startTime, endTime, title, departmentName, minStaff }: {
+  date: string; startTime: string; endTime: string;
   title?: string; departmentName?: string; minStaff?: number;
 }) {
-  const doc = await aw(`/databases/${DATABASE_ID}/collections/shifts/documents`, 'POST', {
-    documentId: 'unique()',
-    data: {
-      orgId, date, startTime, endTime,
-      title: title ?? 'Shift',
-      departmentName: departmentName ?? null,
-      shiftType: 'fixed', status: 'scheduled', isOpen: true,
-      minStaff: minStaff ?? 1,
-    },
-    permissions: ['read("users")','update("users")','delete("users")'],
-  });
-  return { id: doc.$id, date, startTime, endTime, title: title ?? 'Shift' };
+  const { data, error } = await caller.client.from('shifts').insert({
+    org_id: caller.orgId, date, start_time: startTime, end_time: endTime,
+    title: title ?? 'Shift',
+    department_name: departmentName ?? null,
+    shift_type: 'fixed', status: 'scheduled', is_open: true,
+    min_staff: minStaff ?? 1,
+  }).select('id').single();
+  if (error) throw new Error(error.message);
+  return { id: data.id, date, startTime, endTime, title: title ?? 'Shift' };
 }
 
-async function toolUnassignShift({ shiftId, employeeId }: { shiftId: string; employeeId: string }) {
-  const shift = await aw(`/databases/${DATABASE_ID}/collections/shifts/documents/${shiftId}`);
-  const ids:   string[] = (shift.assignedEmployeeIds   ?? []).filter((id: string) => id !== employeeId);
-  const names: string[] = (shift.assignedEmployeeNames ?? []);
+async function toolUnassignShift(caller: Caller, { shiftId, employeeId }: { shiftId: string; employeeId: string }) {
+  const shift = await getOrgShift(caller, shiftId);
+  const ids:   string[] = (shift.assigned_employee_ids   ?? []).filter((id: string) => id !== employeeId);
+  const names: string[] = (shift.assigned_employee_names ?? []);
   // Remove the employee at the matching index
-  const idx = (shift.assignedEmployeeIds ?? []).indexOf(employeeId);
+  const idx = (shift.assigned_employee_ids ?? []).indexOf(employeeId);
   if (idx >= 0) names.splice(idx, 1);
 
-  await aw(`/databases/${DATABASE_ID}/collections/shifts/documents/${shiftId}`, 'PATCH', {
-    data: { isOpen: ids.length === 0, assignedEmployeeIds: ids, assignedEmployeeNames: names },
-  });
+  const { error } = await caller.client.from('shifts')
+    .update({ is_open: ids.length === 0, assigned_employee_ids: ids, assigned_employee_names: names })
+    .eq('id', shiftId).eq('org_id', caller.orgId).select('id').single();
+  if (error) throw new Error(error.message);
   return { success: true, message: `Employee removed from shift ${shiftId}.` };
 }
 
@@ -132,11 +113,10 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        orgId:     { type: 'string', description: 'Organization ID' },
         weekStart: { type: 'string', description: 'Optional start date filter yyyy-MM-dd' },
         weekEnd:   { type: 'string', description: 'Optional end date filter yyyy-MM-dd' },
       },
-      required: ['orgId'],
+      required: [],
     },
   },
   {
@@ -144,10 +124,8 @@ const TOOLS: Anthropic.Tool[] = [
     description: 'Returns all active employees with their name, role, department, and weekly availability schedule.',
     input_schema: {
       type: 'object' as const,
-      properties: {
-        orgId: { type: 'string', description: 'Organization ID' },
-      },
-      required: ['orgId'],
+      properties: {},
+      required: [],
     },
   },
   {
@@ -169,7 +147,6 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        orgId:          { type: 'string' },
         date:           { type: 'string', description: 'yyyy-MM-dd' },
         startTime:      { type: 'string', description: 'HH:mm' },
         endTime:        { type: 'string', description: 'HH:mm' },
@@ -177,7 +154,7 @@ const TOOLS: Anthropic.Tool[] = [
         departmentName: { type: 'string' },
         minStaff:       { type: 'number' },
       },
-      required: ['orgId', 'date', 'startTime', 'endTime'],
+      required: ['date', 'startTime', 'endTime'],
     },
   },
   {
@@ -196,14 +173,14 @@ const TOOLS: Anthropic.Tool[] = [
 
 // ── Execute a tool call ───────────────────────────────────────────────────────
 
-async function executeTool(name: string, input: Record<string, any>): Promise<string> {
+async function executeTool(caller: Caller, name: string, input: Record<string, any>): Promise<string> {
   try {
     let result: unknown;
-    if      (name === 'list_unassigned_shifts')          result = await toolListUnassignedShifts(input as any);
-    else if (name === 'list_employees_with_availability') result = await toolListEmployeesWithAvailability(input as any);
-    else if (name === 'assign_shift')                    result = await toolAssignShift(input as any);
-    else if (name === 'create_shift')                    result = await toolCreateShift(input as any);
-    else if (name === 'unassign_shift')                  result = await toolUnassignShift(input as any);
+    if      (name === 'list_unassigned_shifts')          result = await toolListUnassignedShifts(caller, input as any);
+    else if (name === 'list_employees_with_availability') result = await toolListEmployeesWithAvailability(caller);
+    else if (name === 'assign_shift')                    result = await toolAssignShift(caller, input as any);
+    else if (name === 'create_shift')                    result = await toolCreateShift(caller, input as any);
+    else if (name === 'unassign_shift')                  result = await toolUnassignShift(caller, input as any);
     else result = { error: `Unknown tool: ${name}` };
     return JSON.stringify(result);
   } catch (e: any) {
@@ -225,12 +202,11 @@ interface RequestBody {
   employees?: { name: string; role?: string; department?: string; employmentType?: string; payRate?: string }[];
   shifts?:    { date: string; startTime: string; endTime: string; title?: string; department?: string; status: string }[];
   orgName?:   string;
-  orgId?:     string;
   currentDate?: string;
 }
 
 function buildSystemPrompt(body: RequestBody): string {
-  const { rules = [], employees = [], shifts = [], orgName = 'Your Organization', currentDate, orgId } = body;
+  const { rules = [], employees = [], shifts = [], orgName = 'Your Organization', currentDate } = body;
 
   const activeRules = rules.filter(r => r.isEnabled);
   const hardRules   = activeRules.filter(r => r.constraintType === 'hard');
@@ -255,21 +231,16 @@ ${employees.map(e => `- ${e.name}${e.role ? ` | ${e.role}` : ''}${e.department ?
 ${shifts.slice(0,40).map(s => `- ${s.date} ${s.startTime?.slice(0,5)}–${s.endTime?.slice(0,5)} | ${s.title ?? 'Shift'}${s.department ? ` | ${s.department}` : ''} | ${s.status}`).join('\n')}${shifts.length > 40 ? `\n…and ${shifts.length-40} more` : ''}
 ` : '';
 
-  const toolNote = orgId && process.env.APPWRITE_API_KEY ? `
+  const toolNote = `
 ## TOOLS
-You have tools to READ and WRITE the database directly:
-- **list_unassigned_shifts(orgId)** — get all open shifts
-- **list_employees_with_availability(orgId)** — get employees + their availability
+You have tools to READ and WRITE this organization's database directly:
+- **list_unassigned_shifts()** — get all open shifts
+- **list_employees_with_availability()** — get employees + their availability
 - **assign_shift(shiftId, employeeId, employeeName)** — assign an employee (WRITES to database)
-- **create_shift(orgId, date, startTime, endTime, ...)** — create a new shift
+- **create_shift(date, startTime, endTime, ...)** — create a new shift
 - **unassign_shift(shiftId, employeeId)** — remove an assignment
 
-The org ID is: **${orgId}**
-
 When the user asks you to assign shifts, actually DO it — call the tools. Don't just suggest.
-` : `
-## TOOLS
-Tool use is available but requires APPWRITE_API_KEY to be set in the server environment.
 `;
 
   return `You are TimeSync AI Copilot, an expert workforce scheduling assistant for **${orgName}**.
@@ -285,6 +256,13 @@ ${rulesSection}${employeesSection}${shiftsSection}${toolNote}
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  let caller: Caller;
+  try {
+    caller = await requireCaller(req);
+  } catch (e) {
+    return jsonError(e);
+  }
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return new Response(
       JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured.' }),
@@ -345,7 +323,7 @@ export async function POST(req: NextRequest) {
           // Execute tool calls
           const toolResults: Anthropic.ToolResultBlockParam[] = [];
           for (const tb of toolUseBlocks) {
-            const result = await executeTool(tb.name, tb.input as Record<string, any>);
+            const result = await executeTool(caller, tb.name, tb.input as Record<string, any>);
             send({ tool_action: `✓ ${tb.name.replace(/_/g, ' ')} completed` });
             toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
           }

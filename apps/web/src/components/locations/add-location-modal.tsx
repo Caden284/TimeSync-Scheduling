@@ -21,7 +21,7 @@ export function AddLocationModal({ onClose, onSaved }: Props) {
     setSaving(true); setError('');
     try {
       const doc = await createLocation(profile?.orgId ?? 'local', { name: form.name, city: form.city, state: form.state });
-      onSaved({ id: doc.$id, ...form });
+      onSaved({ id: doc.id, ...form });
       onClose();
     } catch (e: any) { setError(e?.message ?? 'Save failed.'); }
     finally { setSaving(false); }

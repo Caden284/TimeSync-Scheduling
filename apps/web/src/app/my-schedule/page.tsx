@@ -118,7 +118,7 @@ export default function MySchedulePage() {
                     {dayShifts.length === 0 ? (
                       <p className="text-xs text-gray-700 text-center pt-2">–</p>
                     ) : dayShifts.map((s: any) => (
-                      <div key={s.$id} className="rounded-lg p-2.5 text-xs" style={{ backgroundColor: (s.color ?? '#6366f1') + '25', borderLeft: `3px solid ${s.color ?? '#6366f1'}` }}>
+                      <div key={s.id} className="rounded-lg p-2.5 text-xs" style={{ backgroundColor: (s.color ?? '#6366f1') + '25', borderLeft: `3px solid ${s.color ?? '#6366f1'}` }}>
                         <p className="font-semibold text-white truncate">{s.title ?? 'Shift'}</p>
                         <div className="flex items-center gap-1 mt-1 text-gray-400">
                           <Clock size={10} />

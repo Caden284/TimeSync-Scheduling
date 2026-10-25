@@ -108,11 +108,11 @@ function exportSchedulePDF(shifts: Shift[], weekLabel: string, orgName: string) 
   win.document.close();
 }
 
-// ── Appwrite doc → Shift shape ───────────────────────────────────────────────
+// ── Database row → Shift shape ───────────────────────────────────────────────
 
 function docToShift(doc: any): Shift {
   return {
-    id: doc.$id,
+    id: doc.id,
     orgId: doc.orgId,
     scheduleId: doc.scheduleId,
     title: doc.title,
@@ -135,7 +135,7 @@ function docToShift(doc: any): Shift {
     notes: doc.notes,
     assignments: [],
     metadata: {},
-    createdAt: doc.$createdAt,
+    createdAt: doc.createdAt,
     department: doc.departmentId ? { id: doc.departmentId, name: doc.departmentName ?? '', color: doc.departmentColor ?? '#6366f1', orgId: doc.orgId, isActive: true } : undefined,
     location: doc.locationId ? { id: doc.locationId, name: doc.locationName ?? '', orgId: doc.orgId, isActive: true } : undefined,
   };
@@ -161,7 +161,7 @@ export default function SchedulePage() {
   const wEnd   = endOfWeek(parsedDate,   { weekStartsOn: 0 });
   const weekKey = `${profile?.orgId ?? 'local'}-${format(wStart, 'yyyy-MM-dd')}`;
 
-  // Only fetch from Appwrite when the week/org actually changes (not on every re-mount)
+  // Only fetch from Supabase when the week/org actually changes (not on every re-mount)
   useEffect(() => {
     if (!profile?.orgId) return;
     if (cachedWeekKey === weekKey) return;
@@ -222,7 +222,7 @@ export default function SchedulePage() {
       createdAt: new Date().toISOString(),
     };
     addCachedShift(newShift);
-    // Persist to Appwrite if authenticated
+    // Persist to Supabase if authenticated
     if (profile?.orgId) {
       try {
         const doc = await createShift({
@@ -244,7 +244,7 @@ export default function SchedulePage() {
           color: partial.color,
           notes: partial.notes,
         });
-        updateCachedShift(newShift.id, { id: doc.$id });
+        updateCachedShift(newShift.id, { id: doc.id });
         addToast({ type: 'success', title: 'Shift created' });
       } catch (e: any) {
         removeCachedShift(newShift.id);

@@ -2,15 +2,14 @@
 
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { createAdminUser, linkProfileToOrg } from '@/lib/auth';
-import { createOrg } from '@/lib/db';
-import { Zap, CheckCircle, AlertCircle } from 'lucide-react';
+import { signUpAdmin } from '@/lib/auth';
+import { Zap, CheckCircle, AlertCircle, Mail } from 'lucide-react';
 
 const inputCls = 'w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors';
 
 export default function SetupAdminPage() {
   const router = useRouter();
-  const [step, setStep] = useState<'form' | 'done'>('form');
+  const [step, setStep] = useState<'form' | 'done' | 'confirm_email'>('form');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -29,25 +28,41 @@ export default function SetupAdminPage() {
 
     setLoading(true);
     try {
-      // 1. Create auth account (unauthenticated — only requires guests permission)
-      await createAdminUser(form.email, form.password, form.firstName, form.lastName);
-      // 2. Now signed in — create org document
-      const org = await createOrg({
-        name: form.orgName,
-        vertical: form.vertical,
+      // Creates the auth account, then the organization with this user as admin
+      const result = await signUpAdmin({
+        email: form.email, password: form.password,
+        firstName: form.firstName, lastName: form.lastName,
+        orgName: form.orgName, vertical: form.vertical,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        primaryColor: '#6366f1',
-        logoInitials: form.orgName.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase(),
       });
-      // 3. Create user profile linked to org
-      await linkProfileToOrg(org.$id);
+      if (result === 'confirm_email') { setStep('confirm_email'); return; }
       setStep('done');
-      setTimeout(() => router.replace('/schedule'), 2000);
+      // Full navigation so the auth context reloads with the new session + profile
+      setTimeout(() => window.location.replace('/schedule'), 2000);
     } catch (err: any) {
-      setError(err?.message ?? 'Setup failed. Check that the database collections exist and Email/Password auth is enabled in Appwrite.');
+      setError(err?.message ?? 'Setup failed. Check that the Supabase migration has been applied and Email auth is enabled.');
     } finally {
       setLoading(false);
     }
+  }
+
+  if (step === 'confirm_email') {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+        <div className="text-center max-w-sm">
+          <Mail size={48} className="text-indigo-400 mx-auto mb-4" />
+          <h1 className="text-xl font-bold text-white mb-2">Confirm your email</h1>
+          <p className="text-gray-400 text-sm">
+            We sent a confirmation link to <span className="text-white">{form.email}</span>.
+            After confirming, sign in and your organization will be created.
+          </p>
+          <button onClick={() => router.replace('/login')}
+            className="mt-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors">
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (step === 'done') {

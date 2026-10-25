@@ -39,7 +39,7 @@ export default function EmployeesPage() {
     setOrg(mockOrg);
     if (profile?.orgId) {
       getEmployees(profile.orgId)
-        .then(docs => setEmployees(docs.map(d => ({ ...d, id: d.$id }))))
+        .then(docs => setEmployees(docs))
         .catch(() => addToast({ type: 'error', title: 'Failed to load employees' }))
         .finally(() => setLoadingEmployees(false));
     } else {
@@ -140,9 +140,9 @@ export default function EmployeesPage() {
                     )}
                     {filtered.map(emp => {
                       const typeBadge = employmentTypeBadge(emp.employmentType ?? 'full_time');
-                      const isSelected = selectedEmp?.id === emp.id || selectedEmp?.$id === emp.$id;
+                      const isSelected = selectedEmp?.id === emp.id;
                       return (
-                        <tr key={emp.id ?? emp.$id}
+                        <tr key={emp.id}
                           onClick={() => setSelectedEmp(isSelected ? null : emp)}
                           className={cn('cursor-pointer transition-colors', isSelected ? 'bg-indigo-50' : 'hover:bg-gray-50/60')}>
                           <td className="py-3 px-4">
@@ -235,12 +235,12 @@ export default function EmployeesPage() {
       {showEditModal && selectedEmp && (
         <EditEmployeeModal employee={selectedEmp} onClose={() => setShowEditModal(false)}
           onSaved={updated => {
-            setEmployees(prev => prev.map(e => (e.id ?? e.$id) === (updated.id ?? updated.$id) ? updated : e));
+            setEmployees(prev => prev.map(e => (e.id) === (updated.id) ? updated : e));
             setSelectedEmp(updated);
             addToast({ type: 'success', title: 'Employee updated' });
           }}
           onDeleted={id => {
-            setEmployees(prev => prev.filter(e => (e.id ?? e.$id) !== id));
+            setEmployees(prev => prev.filter(e => (e.id) !== id));
             setSelectedEmp(null);
             addToast({ type: 'success', title: 'Employee removed' });
           }} />
