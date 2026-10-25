@@ -41,6 +41,19 @@ In **Authentication → Sign In / Providers → Email**:
 Staff accounts created by an admin from **Settings → Users & Access** are confirmed
 automatically.
 
+In **Authentication → URL Configuration** (needed for "Forgot your password?" and
+email confirmation links):
+
+- **Site URL:** your deployed address, e.g. `https://your-app.vercel.app`
+- **Redirect URLs:** add `https://your-app.vercel.app/**` and, for local development,
+  `http://localhost:3000/**`. Supabase refuses to send people anywhere not on this list.
+
+**Email delivery:** Supabase's built-in email sender only delivers to members of your
+Supabase organization and is limited to a few emails per hour. That's enough to test
+password resets on your own account. Before staff use "Forgot your password?", connect
+your own email provider under **Authentication → Emails → SMTP Settings** (Resend,
+SendGrid, Postmark, or similar).
+
 ## 3. Set environment variables
 
 Copy `apps/web/.env.example` to `apps/web/.env.local` for local development, and add
@@ -88,6 +101,23 @@ What it does:
   `appwrite-migration-credentials.csv` (git-ignored; share it securely, then delete it).
 - Skips and reports records that point at nothing (for example shifts saved with the
   placeholder org id `local`).
+
+## Managing users by hand (SQL Editor)
+
+Ready-made scripts live in [`supabase/snippets/`](../supabase/snippets). Paste one into
+**SQL Editor → New query** and click **Run**.
+
+| Script | What it does |
+|---|---|
+| `01_remove_all_users.sql` | Deletes **every** login and all organization data. Cannot be undone. |
+| `02_make_me_admin.sql` | Creates an organization and makes an existing login its admin. Create the login first under **Authentication → Users → Add user** (tick **Auto Confirm User**), then edit the email/name values at the top of the script. |
+
+The easier alternative to `02` is the app's own `/setup-admin` page, which creates the
+login, the organization, and the admin profile in one step.
+
+**Forgotten passwords:** the login page has a "Forgot your password?" link. It emails a
+link to `/reset-password`, where the user picks a new password (requires the URL
+Configuration and email setup from step 2).
 
 ## How access control works
 
