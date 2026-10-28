@@ -5,7 +5,8 @@ import { X, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Shift } from '@/types';
-import { loadSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
+import { todayISO } from '@/lib/dates';
 
 interface NewShiftModalProps {
   defaultDate?: string;
@@ -25,8 +26,8 @@ const COLORS = ['#6366f1','#ef4444','#f97316','#22c55e','#06b6d4','#8b5cf6','#f5
 const inputCls = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors';
 
 export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalProps) {
-  const setup = loadSetup();
-  const today = new Date().toISOString().split('T')[0];
+  const { departments, locations, taskTypes } = useOrgData();
+  const today = todayISO();
 
   const [form, setForm] = useState({
     title:        '',
@@ -34,25 +35,35 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
     startTime:    '07:00',
     endTime:      '15:00',
     shiftType:    'fixed' as Shift['shiftType'],
-    departmentId: setup?.departments[0]?.id ?? '',
+    departmentId: '',
     roleId:       '',
-    locationId:   setup?.locations[0]?.id ?? '',
+    locationId:   locations.length === 1 ? locations[0].id : '',
     minStaff:     '1',
     maxStaff:     '',
     isOpen:       false,
     notes:        '',
     color:        '#6366f1',
+    taskTypeId:   '',
   });
+
+  function pickTask(id: string) {
+    const task = taskTypes.find(t => t.id === id);
+    const previous = taskTypes.find(t => t.id === form.taskTypeId);
+    setForm(prev => ({
+      ...prev, taskTypeId: id,
+      color: task?.color ?? prev.color,
+      title: task && (!prev.title || prev.title === previous?.name) ? task.name : prev.title,
+    }));
+  }
 
   function update(key: string, value: string | boolean) {
     setForm(prev => ({ ...prev, [key]: value }));
   }
 
   function handleSave() {
-    const dept = setup?.departments.find(d => d.id === form.departmentId);
-    const loc  = setup?.locations.find(l => l.id === form.locationId);
+    const dept = departments.find(d => d.id === form.departmentId);
+    const loc  = locations.find(l => l.id === form.locationId);
     onSave({
-      scheduleId:   'sched-1',
       templateId:   undefined,
       departmentId: form.departmentId || undefined,
       roleId:       form.roleId       || undefined,
@@ -71,8 +82,9 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
       title:          form.title || undefined,
       notes:          form.notes || undefined,
       color:          form.color,
-      department:     dept ? { id: dept.id, name: dept.name, color: dept.color, orgId: 'local', isActive: true } : undefined,
-      location:       loc  ? { id: loc.id,  name: loc.name,  orgId: 'local', isActive: true } : undefined,
+      taskTypeId:     form.taskTypeId || undefined,
+      department:     dept ? { id: dept.id, name: dept.name, color: dept.color, orgId: dept.orgId, isActive: true } : undefined,
+      location:       loc  ? { id: loc.id,  name: loc.name,  orgId: loc.orgId, isActive: true } : undefined,
     });
     onClose();
   }
@@ -84,7 +96,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div role="dialog" aria-modal="true" aria-label="New shift" className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
@@ -93,7 +105,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
             </div>
             <h2 className="text-base font-bold text-gray-900">New Shift</h2>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+          <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -130,6 +142,16 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
               placeholder="e.g. Morning Shift, Day Nurse, Cashier..." className={inputCls} autoFocus />
           </div>
 
+          {taskTypes.length > 0 && (
+            <div>
+              <label htmlFor="new-shift-task" className="block text-xs font-semibold text-gray-700 mb-1.5">Task</label>
+              <select id="new-shift-task" value={form.taskTypeId} onChange={e => pickTask(e.target.value)} className={inputCls}>
+                <option value="">No task (anyone)</option>
+                {taskTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.isBreak ? ' (break)' : ''}</option>)}
+              </select>
+            </div>
+          )}
+
           {/* Date + Times */}
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -152,7 +174,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">Department</label>
               <select value={form.departmentId} onChange={e => update('departmentId', e.target.value)} className={inputCls}>
                 <option value="">No department</option>
-                {setup?.departments.filter(d => d.name).map(d => (
+                {departments.map(d => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
@@ -161,7 +183,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">Location</label>
               <select value={form.locationId} onChange={e => update('locationId', e.target.value)} className={inputCls}>
                 <option value="">No location</option>
-                {setup?.locations.filter(l => l.name).map(l => (
+                {locations.map(l => (
                   <option key={l.id} value={l.id}>{l.name}</option>
                 ))}
               </select>

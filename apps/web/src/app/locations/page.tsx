@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { Button } from '@/components/ui/button';
+import { confirmDialog } from '@/components/ui/confirm-dialog';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { Plus, MapPin, Building2, Globe, Trash2 } from 'lucide-react';
@@ -37,7 +38,7 @@ export default function LocationsPage() {
 
   async function handleDelete(locId: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm('Delete this location? This cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete this location?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setDeleting(locId);
     try {
       await deleteLocation(locId);

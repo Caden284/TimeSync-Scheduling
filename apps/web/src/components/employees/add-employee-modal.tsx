@@ -6,18 +6,19 @@ import { Button } from '@/components/ui/button';
 import { UserPlus } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
 import { createEmployee } from '@/lib/db';
-import { loadSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
 
 interface Props { onClose: () => void; onSaved: (emp: any) => void; }
 
 export function AddEmployeeModal({ onClose, onSaved }: Props) {
   const { profile } = useAuth();
-  const setup = loadSetup();
+  const { departments, workerTypes } = useOrgData();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     role: '', departmentId: '', employmentType: 'full_time', payRate: '',
+    workerTypeId: workerTypes.find(w => w.name === 'Staff')?.id ?? '',
   });
   function set(k: string, v: string) { setForm(p => ({ ...p, [k]: v })); }
 
@@ -25,14 +26,16 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
     if (!form.firstName || !form.lastName) { setError('First and last name are required.'); return; }
     setSaving(true); setError('');
     try {
-      const orgId = profile?.orgId ?? 'local';
-      const dept = setup?.departments.find(d => d.id === form.departmentId);
+      if (!profile?.orgId) throw new Error('Not signed in.');
+      const orgId = profile.orgId;
+      const dept = departments.find(d => d.id === form.departmentId);
       const doc = await createEmployee(orgId, {
         firstName: form.firstName, lastName: form.lastName, email: form.email,
         phone: form.phone,
-        role: form.role, departmentId: form.departmentId,
+        role: form.role, departmentId: dept?.id, departmentName: dept?.name,
         employmentType: form.employmentType,
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,
+        workerTypeId: form.workerTypeId || undefined,
       });
       onSaved({
         id: doc.id, firstName: form.firstName, lastName: form.lastName, email: form.email,
@@ -40,6 +43,7 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
         role: form.role, departmentId: form.departmentId,
         departmentName: dept?.name ?? '', employmentType: form.employmentType,
         payRate: form.payRate ? parseFloat(form.payRate) : undefined,
+        workerTypeId: form.workerTypeId || null,
         isActive: true, orgId,
       });
       onClose();
@@ -70,10 +74,17 @@ export function AddEmployeeModal({ onClose, onSaved }: Props) {
           <input type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} className={inputCls} /></div>
         <div><label className={labelCls}>Job Title / Role</label>
           <input value={form.role} onChange={e => set('role', e.target.value)} placeholder="e.g. Reference Librarian" className={inputCls} /></div>
+<div><label className={labelCls}>Worker Type</label>
+          <select value={form.workerTypeId} onChange={e => set('workerTypeId', e.target.value)} className={inputCls}>
+            <option value="">Not set</option>
+            {workerTypes.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+          <p className="text-[10px] text-gray-400 mt-1">Decides which tasks they can be scheduled for.</p>
+        </div>
         <div><label className={labelCls}>Department</label>
           <select value={form.departmentId} onChange={e => set('departmentId', e.target.value)} className={inputCls}>
             <option value="">No department</option>
-            {setup?.departments.filter(d => d.name).map(d => (
+            {departments.map(d => (
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}
           </select>

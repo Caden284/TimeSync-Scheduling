@@ -1,6 +1,8 @@
 'use client';
 
 import { supabase, TABLES, fromRow, toRow, must } from './supabase';
+import { todayISO } from './dates';
+import type { ShiftRequest, TaskType, WorkerType } from '@/types';
 
 // Access control is enforced by Row Level Security in Postgres
 // (supabase/migrations): users only ever see their own organization's rows,
@@ -83,9 +85,15 @@ export async function getEmployees(orgId: string) {
   return rows.map(r => fromRow(r));
 }
 
+export async function getEmployee(employeeId: string) {
+  const row = must(await supabase.from(TABLES.EMPLOYEES).select().eq('id', employeeId).maybeSingle());
+  return row ? fromRow(row) : null;
+}
+
 export async function createEmployee(orgId: string, data: {
   firstName: string; lastName: string; email: string; phone?: string;
-  role: string; departmentId?: string; employmentType: string; payRate?: number;
+  role: string; departmentId?: string; departmentName?: string; employmentType: string; payRate?: number;
+  workerTypeId?: string;
 }) {
   return insertOne(TABLES.EMPLOYEES, { orgId, ...data, isActive: true });
 }
@@ -94,8 +102,20 @@ export async function updateEmployee(employeeId: string, data: Record<string, un
   return updateOne(TABLES.EMPLOYEES, employeeId, data);
 }
 
-export async function deleteEmployee(employeeId: string) {
-  return deleteOne(TABLES.EMPLOYEES, employeeId);
+// Removes an employee from scheduling without destroying their history:
+// marks them inactive and takes them off any upcoming shifts.
+export async function deactivateEmployee(employeeId: string) {
+  await updateOne(TABLES.EMPLOYEES, employeeId, { isActive: false });
+  const upcoming = must(await supabase.from(TABLES.SHIFTS)
+    .select('id, assigned_employee_ids, assigned_employee_names, min_staff')
+    .contains('assigned_employee_ids', [employeeId])
+    .gte('date', todayISO()));
+  for (const s of upcoming) {
+    const idx = s.assigned_employee_ids.indexOf(employeeId);
+    const ids = s.assigned_employee_ids.filter((_: string, i: number) => i !== idx);
+    const names = (s.assigned_employee_names ?? []).filter((_: string, i: number) => i !== idx);
+    await setShiftAssignments(s.id, ids, names, s.min_staff);
+  }
 }
 
 // ── Schedules ─────────────────────────────────────────────────────────────────
@@ -104,6 +124,21 @@ export async function getSchedules(orgId: string) {
   const rows = must(await supabase.from(TABLES.SCHEDULES).select()
     .eq('org_id', orgId).order('week_start', { ascending: false }).limit(52));
   return rows.map(r => fromRow(r));
+}
+
+export async function getWeekSchedule(orgId: string, weekStart: string) {
+  const row = must(await supabase.from(TABLES.SCHEDULES).select()
+    .eq('org_id', orgId).eq('week_start', weekStart).maybeSingle());
+  return row ? fromRow(row) : null;
+}
+
+// Publishing a week makes its shifts visible to staff and notifies them
+// (database trigger). Unpublishing hides the week again.
+export async function setWeekStatus(orgId: string, weekStart: string, weekEnd: string, status: 'draft' | 'published') {
+  return fromRow(must(await supabase.from(TABLES.SCHEDULES).upsert(toRow({
+    orgId, weekStart, weekEnd, status,
+    publishedAt: status === 'published' ? new Date().toISOString() : null,
+  }), { onConflict: 'org_id,week_start' }).select().single()));
 }
 
 export async function createSchedule(orgId: string, weekStart: string, weekEnd: string) {
@@ -116,12 +151,21 @@ export async function updateScheduleStatus(scheduleId: string, status: 'draft' |
 
 // ── Shifts ────────────────────────────────────────────────────────────────────
 
+// Task-based pre-set schedules can have well over a thousand slots a week,
+// more than one request returns, so this reads page by page.
+const PAGE = 1000;
+
 export async function getShifts(orgId: string, weekStart?: string, weekEnd?: string) {
-  let q = supabase.from(TABLES.SHIFTS).select().eq('org_id', orgId);
-  if (weekStart) q = q.gte('date', weekStart);
-  if (weekEnd)   q = q.lte('date', weekEnd);
-  const rows = must(await q.order('date').order('start_time').limit(500));
-  return rows.map(r => fromRow(r));
+  const all: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase.from(TABLES.SHIFTS).select().eq('org_id', orgId);
+    if (weekStart) q = q.gte('date', weekStart);
+    if (weekEnd)   q = q.lte('date', weekEnd);
+    const rows = must(await q.order('date').order('start_time').order('id').range(from, from + PAGE - 1));
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all.map(r => fromRow(r));
 }
 
 export async function createShift(data: {
@@ -131,8 +175,46 @@ export async function createShift(data: {
   locationId?: string; locationName?: string;
   shiftType: string; status: string; isOpen: boolean;
   minStaff: number; maxStaff?: number; color?: string; notes?: string;
+  taskTypeId?: string;
 }) {
-  return insertOne(TABLES.SHIFTS, { ...data, scheduleId: nullIfEmpty(data.scheduleId) ?? undefined });
+  // Unset task fields are left out, so this works before the tasks migration too.
+  return insertOne(TABLES.SHIFTS, {
+    ...data, scheduleId: nullIfEmpty(data.scheduleId) ?? undefined, taskTypeId: data.taskTypeId || undefined,
+  });
+}
+
+// Inserts many shifts at once. Rows with a templateId that already exist for
+// that date are skipped, so generating from templates twice is harmless.
+export async function createShifts(rows: Record<string, unknown>[]) {
+  let count = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const inserted = must(await supabase.from(TABLES.SHIFTS)
+      .upsert(rows.slice(i, i + 500).map(toRow), { onConflict: 'template_id,date', ignoreDuplicates: true })
+      .select('id'));
+    count += inserted.length;
+  }
+  return count;
+}
+
+// Saves many assignment lists at once (Auto-Schedule on a busy week).
+export async function setManyShiftAssignments(changes: { shiftId: string; employeeIds: string[]; employeeNames: string[]; minStaff?: number }[]) {
+  const rows: any[] = [];
+  for (let i = 0; i < changes.length; i += 20) {
+    rows.push(...await Promise.all(changes.slice(i, i + 20).map(c =>
+      setShiftAssignments(c.shiftId, c.employeeIds, c.employeeNames, c.minStaff))));
+  }
+  return rows;
+}
+
+// A shift is "open" until it has its minimum staff.
+export async function setShiftAssignments(shiftId: string, employeeIds: string[], employeeNames: string[], minStaff = 1) {
+  const isOpen = employeeIds.length < Math.max(1, minStaff);
+  return updateOne(TABLES.SHIFTS, shiftId, {
+    assignedEmployeeIds: employeeIds,
+    assignedEmployeeNames: employeeNames,
+    isOpen,
+    status: isOpen ? 'open' : 'scheduled',
+  });
 }
 
 export async function updateShift(shiftId: string, data: Record<string, unknown>) {
@@ -166,6 +248,19 @@ export async function getTimeOffRequests(orgId: string) {
   return rows.map(r => fromRow(r));
 }
 
+// Pending and approved requests that overlap [from, to].
+export async function getTimeOffInRange(orgId: string, from: string, to: string) {
+  const rows = must(await supabase.from(TABLES.TIME_OFF_REQUESTS).select()
+    .eq('org_id', orgId).neq('status', 'denied').lte('start_date', to).gte('end_date', from));
+  return rows.map(r => fromRow(r));
+}
+
+export async function getMyTimeOffRequests(employeeId: string) {
+  const rows = must(await supabase.from(TABLES.TIME_OFF_REQUESTS).select()
+    .eq('employee_id', employeeId).order('start_date', { ascending: false }).limit(50));
+  return rows.map(r => fromRow(r));
+}
+
 export async function createTimeOffRequest(data: {
   orgId: string; employeeId: string; employeeName: string;
   leaveType: string; startDate: string; endDate: string; reason?: string;
@@ -191,7 +286,7 @@ export async function createRule(orgId: string, data: {
   name: string; ruleType: string; constraintType: string;
   description?: string; isEnabled?: boolean; isSystem?: boolean;
   priority: number; weight?: number; parameters?: Record<string, unknown>;
-  scopeDepts?: string[]; scopeLocations?: string[]; scopeRoles?: string[];
+  scopeDepts?: string[]; scopeLocations?: string[]; scopeRoles?: string[]; scopeWorkerTypes?: string[];
 }) {
   const row = must(await supabase.from(TABLES.SCHEDULING_RULES).insert(toRow({
     orgId,
@@ -207,13 +302,14 @@ export async function createRule(orgId: string, data: {
     scopeDepts: data.scopeDepts ?? [],
     scopeLocations: data.scopeLocations ?? [],
     scopeRoles: data.scopeRoles ?? [],
+    scopeWorkerTypes: data.scopeWorkerTypes ?? [],
   })).select().single());
   return rowToRule(row);
 }
 
 export async function updateRule(ruleId: string, patch: {
-  name?: string; description?: string; isEnabled?: boolean;
-  priority?: number; weight?: number; parameters?: Record<string, unknown>;
+  name?: string; description?: string; isEnabled?: boolean; constraintType?: 'hard' | 'soft';
+  priority?: number; weight?: number; parameters?: Record<string, unknown>; scopeWorkerTypes?: string[];
 }) {
   return updateOne(TABLES.SCHEDULING_RULES, ruleId, patch);
 }
@@ -244,6 +340,7 @@ function rowToRule(row: any) {
     scopeDepts: r.scopeDepts ?? [],
     scopeLocations: r.scopeLocations ?? [],
     scopeRoles: r.scopeRoles ?? [],
+    scopeWorkerTypes: (r.scopeWorkerTypes ?? []) as string[],
     createdAt: r.createdAt,
   };
 }
@@ -300,7 +397,7 @@ function rowToSeason(row: any) {
 export async function getShiftTemplates(orgId: string, seasonId?: string) {
   let q = supabase.from(TABLES.SHIFT_TEMPLATES).select().eq('org_id', orgId);
   if (seasonId) q = q.eq('season_id', seasonId);
-  const rows = must(await q.order('start_time').limit(200));
+  const rows = must(await q.order('start_time').order('name').limit(2000));
   return rows.map(rowToTemplate);
 }
 
@@ -308,9 +405,12 @@ export async function createShiftTemplate(orgId: string, data: {
   seasonId: string; name: string; startTime: string; endTime: string;
   color?: string; departmentId?: string; departmentName?: string;
   minStaff?: number; daysOfWeek: number[]; isActive?: boolean; notes?: string;
+  taskTypeId?: string; preferredEmployeeIds?: string[];
 }) {
   const row = must(await supabase.from(TABLES.SHIFT_TEMPLATES).insert(toRow({
     orgId, ...data, minStaff: data.minStaff ?? 1, isActive: data.isActive ?? true,
+    departmentId: nullIfEmpty(data.departmentId), taskTypeId: data.taskTypeId || undefined,
+    preferredEmployeeIds: data.preferredEmployeeIds?.length ? data.preferredEmployeeIds : undefined,
   })).select().single());
   return rowToTemplate(row);
 }
@@ -319,9 +419,13 @@ export async function updateShiftTemplate(templateId: string, data: Partial<{
   name: string; startTime: string; endTime: string; color: string;
   departmentId: string; departmentName: string; minStaff: number;
   daysOfWeek: number[]; isActive: boolean; notes: string;
+  taskTypeId: string | null; preferredEmployeeIds: string[];
 }>) {
+  const patch = { ...data };
+  if ('departmentId' in patch) patch.departmentId = nullIfEmpty(patch.departmentId) as any;
+  if ('taskTypeId' in patch) patch.taskTypeId = nullIfEmpty(patch.taskTypeId);
   const row = must(await supabase.from(TABLES.SHIFT_TEMPLATES)
-    .update(toRow(data)).eq('id', templateId).select().single());
+    .update(toRow(patch)).eq('id', templateId).select().single());
   return rowToTemplate(row);
 }
 
@@ -332,11 +436,161 @@ export async function deleteShiftTemplate(templateId: string) {
 function rowToTemplate(row: any) {
   const r = fromRow(row);
   // Postgres `time` comes back as HH:mm:ss; the template editor works in HH:mm.
-  return { id: r.id, orgId: r.orgId, seasonId: r.seasonId, name: r.name, startTime: r.startTime?.slice(0, 5), endTime: r.endTime?.slice(0, 5), color: r.color ?? '#6366f1', departmentId: r.departmentId, departmentName: r.departmentName, minStaff: r.minStaff ?? 1, daysOfWeek: r.daysOfWeek ?? [], isActive: r.isActive ?? true, notes: r.notes, createdAt: r.createdAt };
+  return { id: r.id, orgId: r.orgId, seasonId: r.seasonId, name: r.name, startTime: r.startTime?.slice(0, 5), endTime: r.endTime?.slice(0, 5), color: r.color ?? '#6366f1', departmentId: r.departmentId, departmentName: r.departmentName, minStaff: r.minStaff ?? 1, daysOfWeek: r.daysOfWeek ?? [], isActive: r.isActive ?? true, notes: r.notes, taskTypeId: r.taskTypeId ?? undefined, preferredEmployeeIds: (r.preferredEmployeeIds ?? []) as string[], createdAt: r.createdAt };
+}
+
+// ── Worker types ──────────────────────────────────────────────────────────────
+
+export async function getWorkerTypes(orgId: string): Promise<WorkerType[]> {
+  const rows = must(await supabase.from(TABLES.WORKER_TYPES).select()
+    .eq('org_id', orgId).order('sort_order').order('name'));
+  return rows.map(r => fromRow(r) as WorkerType);
+}
+
+export async function createWorkerType(orgId: string, data: { name: string; color: string; sortOrder?: number }) {
+  return insertOne(TABLES.WORKER_TYPES, { orgId, ...data }) as Promise<WorkerType>;
+}
+
+export async function updateWorkerType(id: string, data: Partial<{ name: string; color: string; sortOrder: number }>) {
+  return updateOne(TABLES.WORKER_TYPES, id, data) as Promise<WorkerType>;
+}
+
+export async function deleteWorkerType(id: string) {
+  return deleteOne(TABLES.WORKER_TYPES, id);
+}
+
+// ── Task types ────────────────────────────────────────────────────────────────
+
+export async function getTaskTypes(orgId: string): Promise<TaskType[]> {
+  const rows = must(await supabase.from(TABLES.TASK_TYPES).select()
+    .eq('org_id', orgId).order('name').limit(500));
+  return rows.map(rowToTaskType);
+}
+
+type TaskTypeInput = {
+  name: string; description?: string; color: string; isBreak: boolean;
+  allowedWorkerTypeIds: string[]; allowedEmployeeIds: string[];
+};
+
+export async function createTaskType(orgId: string, data: TaskTypeInput) {
+  return rowToTaskType(must(await supabase.from(TABLES.TASK_TYPES)
+    .insert(toRow({ orgId, ...data })).select().single()));
+}
+
+export async function updateTaskType(id: string, data: Partial<TaskTypeInput>) {
+  return rowToTaskType(must(await supabase.from(TABLES.TASK_TYPES)
+    .update(toRow(data)).eq('id', id).select().single()));
+}
+
+export async function deleteTaskType(id: string) {
+  return deleteOne(TABLES.TASK_TYPES, id);
+}
+
+function rowToTaskType(row: any): TaskType {
+  const r = fromRow(row);
+  return {
+    id: r.id, orgId: r.orgId, name: r.name, description: r.description ?? undefined,
+    color: r.color ?? '#6366f1', isBreak: !!r.isBreak,
+    allowedWorkerTypeIds: r.allowedWorkerTypeIds ?? [], allowedEmployeeIds: r.allowedEmployeeIds ?? [],
+  };
+}
+
+// ── Shift drop requests ───────────────────────────────────────────────────────
+// Staff ask to give up a published shift; admins approve (which removes them
+// from it) or deny. Notifications come from a database trigger.
+
+export async function getShiftRequests(orgId: string, status?: ShiftRequest['status']): Promise<ShiftRequest[]> {
+  let q = supabase.from(TABLES.SHIFT_REQUESTS).select().eq('org_id', orgId);
+  if (status) q = q.eq('status', status);
+  const rows = must(await q.order('created_at', { ascending: false }).limit(200));
+  return rows.map(r => fromRow(r) as ShiftRequest);
+}
+
+export async function getMyShiftRequests(employeeId: string): Promise<ShiftRequest[]> {
+  const rows = must(await supabase.from(TABLES.SHIFT_REQUESTS).select()
+    .eq('employee_id', employeeId).order('created_at', { ascending: false }).limit(100));
+  return rows.map(r => fromRow(r) as ShiftRequest);
+}
+
+export async function requestShiftDrop(data: { orgId: string; shiftId: string; employeeId: string; employeeName: string; note?: string }) {
+  return insertOne(TABLES.SHIFT_REQUESTS, { ...data, status: 'pending' }) as Promise<ShiftRequest>;
+}
+
+export async function cancelShiftRequest(id: string) {
+  return updateOne(TABLES.SHIFT_REQUESTS, id, { status: 'cancelled' });
+}
+
+// Approving takes the employee off the shift (re-opening it if that drops
+// it below its minimum staff).
+export async function decideShiftRequest(request: ShiftRequest, status: 'approved' | 'denied') {
+  if (status === 'approved') {
+    const shift = fromRow(must(await supabase.from(TABLES.SHIFTS)
+      .select('id, assigned_employee_ids, assigned_employee_names, min_staff').eq('id', request.shiftId).single()));
+    const ids: string[] = shift.assignedEmployeeIds ?? [];
+    const idx = ids.indexOf(request.employeeId);
+    if (idx >= 0) {
+      await setShiftAssignments(shift.id,
+        ids.filter((_, i) => i !== idx),
+        (shift.assignedEmployeeNames ?? []).filter((_: string, i: number) => i !== idx),
+        shift.minStaff);
+    }
+  }
+  return updateOne(TABLES.SHIFT_REQUESTS, request.id, { status, decidedAt: new Date().toISOString() });
+}
+
+export async function rotateMyCalendarToken(): Promise<string> {
+  return must(await supabase.rpc('rotate_my_calendar_token')) as string;
 }
 
 // ── Employee Availability ─────────────────────────────────────────────────────
 
 export async function updateEmployeeAvailability(employeeId: string, weeklyAvailability: object) {
   return updateOne(TABLES.EMPLOYEES, employeeId, { weeklyAvailability });
+}
+
+export async function setMyAvailability(weeklyAvailability: object) {
+  must(await supabase.rpc('set_my_availability', { p_availability: weeklyAvailability }));
+}
+
+// ── Availability overrides ────────────────────────────────────────────────────
+
+export async function getAvailabilityOverrides(orgId: string, from: string, to: string) {
+  const rows = must(await supabase.from(TABLES.AVAILABILITY_OVERRIDES).select()
+    .eq('org_id', orgId).gte('date', from).lte('date', to));
+  return rows.map(r => fromRow(r));
+}
+
+// ── Users & access ────────────────────────────────────────────────────────────
+
+export async function getOrgUsers(orgId: string) {
+  const rows = must(await supabase.from(TABLES.USER_PROFILES).select()
+    .eq('org_id', orgId).order('last_name'));
+  return rows.map(r => fromRow(r));
+}
+
+export async function updateUserProfile(profileId: string, data: { role?: 'admin' | 'staff'; employeeId?: string | null }) {
+  return updateOne(TABLES.USER_PROFILES, profileId, data);
+}
+
+export async function completeOnboarding(orgId: string) {
+  return updateOne(TABLES.ORGANIZATIONS, orgId, { onboardingCompletedAt: new Date().toISOString() });
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+// Created by database triggers; users can only read, mark read, and dismiss.
+
+export async function getNotifications(limit = 30) {
+  const rows = must(await supabase.from(TABLES.NOTIFICATIONS).select()
+    .order('created_at', { ascending: false }).limit(limit));
+  return rows.map(r => fromRow(r));
+}
+
+export async function markNotificationsRead(ids: string[]) {
+  if (!ids.length) return;
+  must(await supabase.from(TABLES.NOTIFICATIONS)
+    .update({ read_at: new Date().toISOString() }).in('id', ids));
+}
+
+export async function dismissNotification(id: string) {
+  return deleteOne(TABLES.NOTIFICATIONS, id);
 }

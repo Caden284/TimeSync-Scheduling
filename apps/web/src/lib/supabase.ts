@@ -33,6 +33,10 @@ export const TABLES = {
   SEASONS:                'seasons',
   SHIFT_TEMPLATES:        'shift_templates',
   AVAILABILITY_OVERRIDES: 'availability_overrides',
+  NOTIFICATIONS:          'notifications',
+  WORKER_TYPES:           'worker_types',
+  TASK_TYPES:             'task_types',
+  SHIFT_REQUESTS:         'shift_requests',
 } as const;
 
 // Authorization header for calls to our own Next.js API routes.

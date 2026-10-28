@@ -2,11 +2,11 @@
 
 import { cn, getContrastColor } from '@/lib/utils';
 import { useAppStore } from '@/store';
-import { loadSetup, clearSetup } from '@/lib/org-store';
+import { useOrgData } from '@/lib/org-data';
 import { useAuth } from '@/context/auth-context';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import {
   Calendar, Users, ShieldCheck, BarChart3, MessageSquareMore,
   Settings, ChevronLeft, ChevronRight, Zap, Clock, FileText,
@@ -26,40 +26,45 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useAppStore();
+  const { sidebarCollapsed: collapsedSetting, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useAppStore();
+  // The phone drawer always shows labels.
+  const sidebarCollapsed = collapsedSetting && !mobileNavOpen;
   const pathname = usePathname();
+
+  // Close the phone drawer after navigating, and with Escape.
+  useEffect(() => { setMobileNavOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileNavOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen]);
   const router = useRouter();
   const { profile, logout } = useAuth();
-  const [orgName, setOrgName] = useState('TimeSync');
-  const [orgColor, setOrgColor] = useState('#6366f1');
-  const [orgInitials, setOrgInitials] = useState('TS');
-
-  useEffect(() => {
-    const setup = loadSetup();
-    if (setup) {
-      setOrgName(setup.org.name);
-      setOrgColor(setup.org.primaryColor);
-      setOrgInitials(setup.org.logoInitials);
-    }
-  }, []);
+  const { org } = useOrgData();
+  const orgName = org?.name ?? 'TimeSync';
+  const orgColor = org?.primaryColor ?? '#6366f1';
+  const orgInitials = org?.logoInitials || orgName.slice(0, 2).toUpperCase();
+  const userInitials = profile
+    ? `${profile.firstName?.[0] ?? ''}${profile.lastName?.[0] ?? ''}` || profile.email?.[0]?.toUpperCase() || '?'
+    : orgInitials[0];
 
   async function handleLogout() {
     await logout();
     router.replace('/login');
   }
 
-  function handleReset() {
-    if (confirm('Reset TimeSync and start a new organization? All local data will be cleared.')) {
-      clearSetup();
-      router.replace('/onboarding');
-    }
-  }
-
   const logoFg = getContrastColor(orgColor);
 
   return (
-    <aside className={cn(
-      'flex flex-col bg-gray-950 text-gray-300 transition-all duration-200 ease-in-out h-screen sticky top-0 z-30 border-r border-gray-800',
+    <>
+    {mobileNavOpen && (
+      <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
+    )}
+    <aside id="app-sidebar" aria-label="Main navigation" className={cn(
+      'flex flex-col bg-gray-950 text-gray-300 transition-all duration-200 ease-in-out h-screen border-r border-gray-800',
+      'fixed inset-y-0 left-0 z-50 md:sticky md:top-0 md:z-30 md:translate-x-0',
+      mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
       sidebarCollapsed ? 'w-16' : 'w-60'
     )}>
       {/* Logo */}
@@ -89,6 +94,8 @@ export function Sidebar() {
                   key={item.href}
                   href={item.href}
                   title={sidebarCollapsed ? item.label : undefined}
+                  aria-label={sidebarCollapsed ? item.label : undefined}
+                  aria-current={active ? 'page' : undefined}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
                     active ? 'bg-indigo-600/20 text-indigo-400' : 'text-gray-400 hover:bg-gray-800 hover:text-white',
@@ -112,6 +119,8 @@ export function Sidebar() {
         <Link
           href="/settings"
           title={sidebarCollapsed ? 'Settings' : undefined}
+          aria-label={sidebarCollapsed ? 'Settings' : undefined}
+          aria-current={pathname.startsWith('/settings') ? 'page' : undefined}
           className={cn(
             'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition-colors',
             sidebarCollapsed && 'justify-center px-2'
@@ -128,18 +137,18 @@ export function Sidebar() {
         )}>
           <div className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ backgroundColor: orgColor, color: logoFg }}>
-            {profile ? `${profile.firstName[0]}${profile.lastName[0]}` : (orgInitials[0] ?? '?')}
+            {userInitials}
           </div>
           {!sidebarCollapsed && (
             <div className="overflow-hidden flex-1">
               <p className="text-xs font-medium text-white truncate">
-                {profile ? `${profile.firstName} ${profile.lastName}` : orgName}
+                {profile ? `${profile.firstName} ${profile.lastName}`.trim() || profile.email : orgName}
               </p>
               <p className="text-[10px] text-gray-500 truncate capitalize">{profile?.role ?? 'Administrator'}</p>
             </div>
           )}
           {!sidebarCollapsed && (
-            <button onClick={handleLogout} title="Sign out"
+            <button onClick={handleLogout} title="Sign out" aria-label="Sign out"
               className="text-gray-600 hover:text-red-400 transition-colors">
               <LogOut size={14} />
             </button>
@@ -150,10 +159,12 @@ export function Sidebar() {
       {/* Collapse toggle */}
       <button
         onClick={toggleSidebar}
-        className="absolute -right-3 top-20 h-6 w-6 rounded-full border border-gray-700 bg-gray-900 flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 transition-colors shadow-sm"
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        className="absolute -right-3 top-20 h-6 w-6 rounded-full border border-gray-700 bg-gray-900 hidden md:flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 transition-colors shadow-sm"
       >
         {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
       </button>
     </aside>
+    </>
   );
 }

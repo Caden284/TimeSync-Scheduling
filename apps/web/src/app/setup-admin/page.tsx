@@ -38,7 +38,7 @@ export default function SetupAdminPage() {
       if (result === 'confirm_email') { setStep('confirm_email'); return; }
       setStep('done');
       // Full navigation so the auth context reloads with the new session + profile
-      setTimeout(() => window.location.replace('/schedule'), 2000);
+      setTimeout(() => window.location.replace('/onboarding'), 1500);
     } catch (err: any) {
       setError(err?.message ?? 'Setup failed. Check that the Supabase migration has been applied and Email auth is enabled.');
     } finally {
@@ -71,7 +71,7 @@ export default function SetupAdminPage() {
         <div className="text-center">
           <CheckCircle size={48} className="text-green-400 mx-auto mb-4" />
           <h1 className="text-xl font-bold text-white mb-2">Admin account created!</h1>
-          <p className="text-gray-400 text-sm">Redirecting to your schedule…</p>
+          <p className="text-gray-400 text-sm">Next: set up your departments, locations, and team…</p>
         </div>
       </div>
     );

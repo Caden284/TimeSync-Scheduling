@@ -102,14 +102,33 @@ export async function signUpAdmin(input: {
   return 'ready';
 }
 
+// Emails a password-reset link that returns the user to /reset-password.
+// The link only works if that URL is allowed under Supabase → Authentication →
+// URL Configuration → Redirect URLs.
+export async function requestPasswordReset(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
+  if (error) throw new Error(error.message);
+}
+
+// Sets a new password for the signed-in user (the reset link signs them in).
+export async function updatePassword(password: string) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw new Error(error.message);
+}
+
 // Invite a staff or admin user into the caller's organization. Runs on the
 // server (/api/admin/users) because creating another user's account needs the
 // service-role key, and the server re-checks that the caller is an admin.
-export async function inviteUser(email: string, password: string, firstName: string, lastName: string, role: 'admin' | 'staff', employeeId?: string) {
+export async function inviteUser(
+  email: string, password: string, firstName: string, lastName: string, role: 'admin' | 'staff',
+  link: { employeeId?: string; createEmployee?: boolean } = {},
+) {
   const res = await fetch('/api/admin/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-    body: JSON.stringify({ email, password, firstName, lastName, role, employeeId }),
+    body: JSON.stringify({ email, password, firstName, lastName, role, ...link }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error ?? `Failed to create user (${res.status})`);

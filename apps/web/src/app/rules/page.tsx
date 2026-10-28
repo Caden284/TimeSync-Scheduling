@@ -5,10 +5,12 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { confirmDialog } from '@/components/ui/confirm-dialog';
 import { useAppStore, useRulesStore } from '@/store';
-import { mockRules } from '@/lib/mock-data';
 import { useAuth } from '@/context/auth-context';
-import { getRules, createRule, toggleRule as dbToggleRule, deleteRule as dbDeleteRule } from '@/lib/db';
+import { useOrgData } from '@/lib/org-data';
+import { getRules, createRule, updateRule as dbUpdateRule, toggleRule as dbToggleRule, deleteRule as dbDeleteRule } from '@/lib/db';
+import { RULE_PARAMS, isRuleEnforced, ruleValue } from '@/lib/rule-engine';
 import { cn } from '@/lib/utils';
 import { Plus, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, Zap, ChevronRight, Loader2 } from 'lucide-react';
 import type { SchedulingRule } from '@/types';
@@ -26,14 +28,10 @@ const RULE_TYPE_ICONS: Record<string, string> = {
   SENIORITY_ORDER: '🏆', SKILL_MATCH_QUALITY: '🎯',
 };
 
-// Default system rules seeded the first time an org has no rules in the database
-const SYSTEM_DEFAULTS = mockRules.filter(r =>
-  ['MAX_HOURS_WEEK', 'MIN_REST_BETWEEN', 'PREFER_AVAILABILITY', 'BALANCE_WEEKENDS', 'MINIMIZE_OVERTIME'].includes(r.ruleType)
-);
-
 export default function RulesPage() {
   const { copilotOpen, addToast } = useAppStore();
   const { profile } = useAuth();
+  const { departments, workerTypes } = useOrgData();
   const { rules, setOrgRules, addRule: storeAddRule, toggleRule: storeToggle, deleteRule: storeDelete, updateRule: storeUpdate } = useRulesStore();
   const [selected, setSelected] = useState<SchedulingRule | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -45,27 +43,9 @@ export default function RulesPage() {
   useEffect(() => {
     if (!profile?.orgId) return;
     setLoading(true);
+    // New organizations get default rules from the database when they're created.
     getRules(profile.orgId)
-      .then(async (fetched) => {
-        if (fetched.length === 0) {
-          // First-time: seed universal defaults into the database
-          const seeded: SchedulingRule[] = [];
-          for (const r of SYSTEM_DEFAULTS) {
-            try {
-              const saved = await createRule(profile.orgId, {
-                name: r.name, ruleType: r.ruleType, constraintType: r.constraintType,
-                description: r.description, isEnabled: r.isEnabled, isSystem: r.isSystem ?? false,
-                priority: r.priority, weight: r.weight,
-                parameters: r.parameters as Record<string, unknown>,
-              });
-              seeded.push(saved as unknown as SchedulingRule);
-            } catch {}
-          }
-          setOrgRules(profile.orgId, seeded);
-        } else {
-          setOrgRules(profile.orgId, fetched as unknown as SchedulingRule[]);
-        }
-      })
+      .then(fetched => setOrgRules(profile.orgId, fetched as unknown as SchedulingRule[]))
       .catch(() => addToast({ type: 'error', title: 'Failed to load rules' }))
       .finally(() => setLoading(false));
   }, [profile?.orgId]);
@@ -90,7 +70,7 @@ export default function RulesPage() {
 
   async function deleteRule(id: string) {
     const rule = rules.find(r => r.id === id);
-    if (!rule || !confirm(`Delete "${rule.name}"? This cannot be undone.`)) return;
+    if (!rule || !(await confirmDialog({ title: `Delete "${rule.name}"?`, message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setDeleting(id);
     storeDelete(id);
     if (selected?.id === id) setSelected(null);
@@ -112,6 +92,8 @@ export default function RulesPage() {
         description: rule.description, isEnabled: true, isSystem: false,
         priority: rule.priority, weight: rule.weight,
         parameters: rule.parameters as Record<string, unknown>,
+        scopeDepts: rule.scopeDepts,
+        scopeWorkerTypes: rule.scopeWorkerTypes,
       });
       storeAddRule(saved as unknown as SchedulingRule);
       addToast({ type: 'success', title: 'Rule created', message: rule.name });
@@ -152,7 +134,7 @@ export default function RulesPage() {
               {/* Hard Constraints */}
               <RuleGroup
                 title="Hard Constraints"
-                description="These rules cannot be violated — the AI will never generate a schedule that breaks them."
+                description="Assignments that break these are blocked — in the Assign picker, Auto-Schedule, and the AI Copilot."
                 icon={<ShieldAlert size={16} className="text-red-500" />}
                 badgeVariant="danger"
                 rules={hardRules}
@@ -165,7 +147,7 @@ export default function RulesPage() {
               {/* Soft Constraints */}
               <RuleGroup
                 title="Soft Constraints"
-                description="The AI will try to satisfy these rules but may trade them off when necessary. Each has a configurable weight."
+                description="Assignments that break these show a warning. Auto-Schedule avoids them whenever someone else is free."
                 icon={<ShieldCheck size={16} className="text-indigo-500" />}
                 badgeVariant="primary"
                 rules={softRules}
@@ -189,41 +171,24 @@ export default function RulesPage() {
                     <h2 className="text-base font-bold text-gray-900">{selected.name}</h2>
                     <p className="text-xs text-gray-500 mt-1">{selected.description}</p>
                   </div>
-                  <button onClick={() => setSelected(null)} className="p-1 text-gray-400 hover:text-gray-600">✕</button>
+                  <button onClick={() => setSelected(null)} aria-label="Close rule details" className="p-1 text-gray-400 hover:text-gray-600">✕</button>
                 </div>
               </div>
 
               <div className="p-5 space-y-4">
-                <Section title="Configuration">
-                  <InfoRow label="Type" value={selected.ruleType} />
-                  <InfoRow label="Category" value={selected.constraintType === 'hard' ? '🔴 Hard constraint' : '🟡 Soft constraint'} />
-                  <InfoRow label="Priority" value={String(selected.priority)} />
-                  {selected.weight !== undefined && (
-                    <div>
-                      <InfoRow label="Weight" value={`${(selected.weight * 100).toFixed(0)}%`} />
-                      <div className="h-1.5 rounded-full bg-gray-100 mt-1">
-                        <div
-                          className="h-full rounded-full bg-indigo-500"
-                          style={{ width: `${(selected.weight ?? 0) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </Section>
+                <RuleSettings rule={selected} onSaved={updated => {
+                  storeUpdate(selected.id, updated);
+                  setSelected(prev => (prev ? { ...prev, ...updated } : prev));
+                }} />
 
                 <Section title="Scope">
-                  <InfoRow label="Departments" value={selected.scopeDepts?.length ? `${selected.scopeDepts.length} dept(s)` : 'All departments'} />
-                  <InfoRow label="Locations" value={selected.scopeLocations?.length ? `${selected.scopeLocations.length} location(s)` : 'All locations'} />
-                  <InfoRow label="Roles" value={selected.scopeRoles?.length ? `${selected.scopeRoles.length} role(s)` : 'All roles'} />
+                  <InfoRow label="People" value={selected.scopeWorkerTypes?.length
+                    ? selected.scopeWorkerTypes.map(id => workerTypes.find(w => w.id === id)?.name ?? 'Unknown').join(', ')
+                    : 'Everyone'} />
+                  <InfoRow label="Departments" value={selected.scopeDepts?.length
+                    ? selected.scopeDepts.map(id => departments.find(d => d.id === id)?.name ?? 'Unknown').join(', ')
+                    : 'All departments'} />
                 </Section>
-
-                {Object.keys(selected.parameters).length > 0 && (
-                  <Section title="Parameters">
-                    {Object.entries(selected.parameters).map(([k, v]) => (
-                      <InfoRow key={k} label={k.replace(/_/g, ' ')} value={String(v)} />
-                    ))}
-                  </Section>
-                )}
 
                 <Section title="Status">
                   <InfoRow label="Enabled" value={selected.isEnabled ? '✅ Active' : '⏸ Disabled'} />
@@ -303,8 +268,14 @@ function RuleGroup({
                 {rule.isSystem && (
                   <Badge variant="default" className="text-[9px]">System</Badge>
                 )}
+                {!isRuleEnforced(rule.ruleType) && (
+                  <Badge variant="warning" className="text-[9px]">Not checked</Badge>
+                )}
               </div>
-              <p className="text-xs text-gray-500 truncate mt-0.5">{rule.description}</p>
+              <p className="text-xs text-gray-500 truncate mt-0.5">
+                {RULE_PARAMS[rule.ruleType] && <span className="font-medium text-gray-700">{ruleValue(rule)} {RULE_PARAMS[rule.ruleType].unit} · </span>}
+                {rule.description}
+              </p>
             </div>
 
             {rule.weight !== undefined && (
@@ -323,6 +294,8 @@ function RuleGroup({
               <button
                 onClick={(e) => { e.stopPropagation(); onToggle(rule.id); }}
                 disabled={toggling === rule.id}
+                aria-label={rule.isEnabled ? `Disable ${rule.name}` : `Enable ${rule.name}`}
+                aria-pressed={rule.isEnabled}
                 className={cn(
                   'transition-colors',
                   toggling === rule.id ? 'text-gray-300' : rule.isEnabled ? 'text-indigo-600' : 'text-gray-300'
@@ -356,5 +329,69 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="text-gray-500 capitalize">{label}</span>
       <span className="font-medium text-gray-900">{value}</span>
     </div>
+  );
+}
+
+// Threshold and hard/soft switch for the selected rule.
+function RuleSettings({ rule, onSaved }: { rule: SchedulingRule; onSaved: (patch: Partial<SchedulingRule>) => void }) {
+  const { addToast } = useAppStore();
+  const meta = RULE_PARAMS[rule.ruleType];
+  const [value, setValue] = useState(String(ruleValue(rule)));
+  const [constraintType, setConstraintType] = useState(rule.constraintType);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setValue(String(ruleValue(rule))); setConstraintType(rule.constraintType); }, [rule.id]);
+
+  const dirty = constraintType !== rule.constraintType || (meta && Number(value) !== ruleValue(rule));
+
+  async function save() {
+    const n = Number(value);
+    if (meta && (!Number.isFinite(n) || n <= 0)) { addToast({ type: 'error', title: `${meta.label} must be a positive number` }); return; }
+    setSaving(true);
+    try {
+      const parameters = meta ? { ...rule.parameters, [meta.key]: n } : rule.parameters;
+      if (meta) delete (parameters as Record<string, unknown>).value;
+      await dbUpdateRule(rule.id, { constraintType, parameters: parameters as Record<string, unknown> });
+      onSaved({ constraintType, parameters });
+      addToast({ type: 'success', title: 'Rule updated' });
+    } catch (e: any) {
+      addToast({ type: 'error', title: 'Could not update rule', message: e?.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Section title="Settings">
+      {!isRuleEnforced(rule.ruleType) && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">
+          TimeSync doesn&apos;t track the data this rule needs (skills, certifications, or breaks), so it isn&apos;t checked yet.
+        </p>
+      )}
+      {meta && (
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">{meta.label}</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min="1" value={value} onChange={e => setValue(e.target.value)}
+              className="w-24 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <span className="text-xs text-gray-500">{meta.unit}</span>
+          </div>
+        </div>
+      )}
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">When broken</label>
+        <div className="grid grid-cols-2 gap-1.5">
+          {(['hard', 'soft'] as const).map(t => (
+            <button key={t} onClick={() => setConstraintType(t)}
+              className={cn('rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors',
+                constraintType === t
+                  ? t === 'hard' ? 'border-red-300 bg-red-50 text-red-700' : 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300')}>
+              {t === 'hard' ? 'Block' : 'Warn'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {dirty && <Button variant="primary" size="sm" className="w-full" onClick={save} loading={saving}>Save changes</Button>}
+    </Section>
   );
 }

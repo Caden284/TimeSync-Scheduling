@@ -11,8 +11,8 @@ import { AddEmployeeModal } from '@/components/employees/add-employee-modal';
 import { EditEmployeeModal } from '@/components/employees/edit-employee-modal';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/context/auth-context';
-import { mockOrg } from '@/lib/mock-data';
 import { getEmployees } from '@/lib/db';
+import { useOrgData } from '@/lib/org-data';
 import { employmentTypeBadge, getEmployeeDisplayName, cn } from '@/lib/utils';
 import { Search, Plus, Filter, MoreHorizontal, Mail, Phone, Edit2, X } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
@@ -24,19 +24,20 @@ const STATUS_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'default'>
 const EMPLOYMENT_TYPES = ['all', 'full_time', 'part_time', 'contract', 'per_diem'];
 
 export default function EmployeesPage() {
-  const { setOrg, copilotOpen, addToast } = useAppStore();
+  const { copilotOpen, addToast } = useAppStore();
   const { profile } = useAuth();
   const [employees, setEmployees] = useState<any[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [filterWorker, setFilterWorker] = useState('all');
+  const { workerTypes } = useOrgData();
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [selectedEmp, setSelectedEmp] = useState<any | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
-    setOrg(mockOrg);
     if (profile?.orgId) {
       getEmployees(profile.orgId)
         .then(docs => setEmployees(docs))
@@ -55,7 +56,8 @@ export default function EmployeesPage() {
       (emp.email     ?? '').toLowerCase().includes(q) ||
       (emp.role      ?? '').toLowerCase().includes(q);
     const matchType = filterType === 'all' || emp.employmentType === filterType;
-    return matchSearch && matchType;
+    const matchWorker = filterWorker === 'all' || (emp.workerTypeId ?? '') === filterWorker;
+    return matchSearch && matchType && matchWorker;
   });
 
   const activeCount = employees.filter(e => e.isActive !== false && e.status !== 'terminated').length;
@@ -90,6 +92,7 @@ export default function EmployeesPage() {
                 <Button variant="secondary" size="sm" leftIcon={<Filter size={13} />} className="text-xs"
                   onClick={() => setShowFilterPanel(p => !p)}>
                   Filter {filterType !== 'all' && `· ${filterType.replace('_', '-')}`}
+                  {filterWorker !== 'all' && ` · ${workerTypes.find(w => w.id === filterWorker)?.name ?? 'No type'}`}
                 </Button>
                 <div className="ml-auto text-sm text-gray-500">{filtered.length} employee{filtered.length !== 1 ? 's' : ''}</div>
               </div>
@@ -105,8 +108,18 @@ export default function EmployeesPage() {
                       {t === 'all' ? 'All' : t.replace('_', '-')}
                     </button>
                   ))}
-                  {filterType !== 'all' && (
-                    <button onClick={() => setFilterType('all')} className="ml-auto text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+                  {workerTypes.length > 0 && <>
+                    <span className="text-xs font-semibold text-gray-500 ml-3 mr-1">Worker type:</span>
+                    {[{ id: 'all', name: 'All' }, ...workerTypes, { id: '', name: 'Not set' }].map(w => (
+                      <button key={w.id || 'none'} onClick={() => setFilterWorker(w.id)} aria-pressed={filterWorker === w.id}
+                        className={cn('px-2.5 py-1 rounded-md text-xs transition-all',
+                          filterWorker === w.id ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
+                        {w.name}
+                      </button>
+                    ))}
+                  </>}
+                  {(filterType !== 'all' || filterWorker !== 'all') && (
+                    <button onClick={() => { setFilterType('all'); setFilterWorker('all'); }} className="ml-auto text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
                       <X size={11} /> Clear
                     </button>
                   )}
@@ -160,15 +173,26 @@ export default function EmployeesPage() {
                             <p className="text-xs text-gray-400">{emp.departmentName ?? emp.primaryDept?.name ?? ''}</p>
                           </td>
                           <td className="py-3 px-4">
-                            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', typeBadge.className)}>
-                              {typeBadge.label}
-                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {(() => {
+                                const wt = workerTypes.find(w => w.id === emp.workerTypeId);
+                                return wt && (
+                                  <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ backgroundColor: wt.color }}>
+                                    {wt.name}
+                                  </span>
+                                );
+                              })()}
+                              <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', typeBadge.className)}>
+                                {typeBadge.label}
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3 px-4 font-medium text-gray-900">
                             {emp.payRate ? `$${parseFloat(emp.payRate).toFixed(2)}/hr` : '—'}
                           </td>
                           <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
                             <button onClick={() => { setSelectedEmp(emp); setShowEditModal(true); }}
+                              aria-label={`Edit ${emp.firstName} ${emp.lastName}`}
                               className="p-1 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
                               <Edit2 size={14} />
                             </button>

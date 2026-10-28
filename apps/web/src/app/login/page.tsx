@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/context/auth-context';
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react';
 
@@ -27,8 +28,8 @@ export default function LoginPage() {
     setError('');
     setSubmitting(true);
     try {
-      await login(email, password);
-      router.replace('/schedule');
+      const signedIn = await login(email, password);
+      router.replace(signedIn?.role === 'staff' ? '/my-schedule' : '/schedule');
     } catch (err: any) {
       setError(err?.message ?? 'Invalid email or password.');
     } finally {
@@ -66,7 +67,12 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-400 mb-1.5">Password</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold text-gray-400">Password</label>
+              <Link href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+                Forgot your password?
+              </Link>
+            </div>
             <div className="relative">
               <input
                 type={showPw ? 'text' : 'password'} required value={password}
