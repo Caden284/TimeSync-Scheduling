@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Bell, X, CalendarCheck, CalendarX, CalendarClock, Plane, CheckCircle2, XCircle, UserMinus } from 'lucide-react';
+import { Bell, X, CalendarCheck, CalendarX, CalendarClock, Plane, CheckCircle2, XCircle, UserMinus, Repeat, HandHelping } from 'lucide-react';
 import { supabase, fromRow } from '@/lib/supabase';
 import { getNotifications, markNotificationsRead, dismissNotification } from '@/lib/db';
 import { useAuth } from '@/context/auth-context';
@@ -23,6 +23,10 @@ const ICONS: Record<string, React.ReactNode> = {
   time_off_requested: <Plane size={14} className="text-blue-500" />,
   time_off_approved:  <CheckCircle2 size={14} className="text-green-500" />,
   time_off_denied:    <XCircle size={14} className="text-red-500" />,
+  shift_drop_requested: <Repeat size={14} className="text-blue-500" />,
+  shift_drop_approved:  <CheckCircle2 size={14} className="text-green-500" />,
+  shift_drop_denied:    <XCircle size={14} className="text-red-500" />,
+  open_shift_claimed:   <HandHelping size={14} className="text-green-500" />,
 };
 
 // Bell with a live list of the signed-in user's notifications. Rows are

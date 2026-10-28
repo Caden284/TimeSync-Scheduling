@@ -6,6 +6,7 @@ import { useOrgData } from '@/lib/org-data';
 import { useAuth } from '@/context/auth-context';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 import {
   Calendar, Users, ShieldCheck, BarChart3, MessageSquareMore,
   Settings, ChevronLeft, ChevronRight, Zap, Clock, FileText,
@@ -25,8 +26,19 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useAppStore();
+  const { sidebarCollapsed: collapsedSetting, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useAppStore();
+  // The phone drawer always shows labels.
+  const sidebarCollapsed = collapsedSetting && !mobileNavOpen;
   const pathname = usePathname();
+
+  // Close the phone drawer after navigating, and with Escape.
+  useEffect(() => { setMobileNavOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileNavOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen]);
   const router = useRouter();
   const { profile, logout } = useAuth();
   const { org } = useOrgData();
@@ -45,8 +57,14 @@ export function Sidebar() {
   const logoFg = getContrastColor(orgColor);
 
   return (
-    <aside className={cn(
-      'flex flex-col bg-gray-950 text-gray-300 transition-all duration-200 ease-in-out h-screen sticky top-0 z-30 border-r border-gray-800',
+    <>
+    {mobileNavOpen && (
+      <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
+    )}
+    <aside id="app-sidebar" aria-label="Main navigation" className={cn(
+      'flex flex-col bg-gray-950 text-gray-300 transition-all duration-200 ease-in-out h-screen border-r border-gray-800',
+      'fixed inset-y-0 left-0 z-50 md:sticky md:top-0 md:z-30 md:translate-x-0',
+      mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
       sidebarCollapsed ? 'w-16' : 'w-60'
     )}>
       {/* Logo */}
@@ -76,6 +94,8 @@ export function Sidebar() {
                   key={item.href}
                   href={item.href}
                   title={sidebarCollapsed ? item.label : undefined}
+                  aria-label={sidebarCollapsed ? item.label : undefined}
+                  aria-current={active ? 'page' : undefined}
                   className={cn(
                     'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
                     active ? 'bg-indigo-600/20 text-indigo-400' : 'text-gray-400 hover:bg-gray-800 hover:text-white',
@@ -99,6 +119,8 @@ export function Sidebar() {
         <Link
           href="/settings"
           title={sidebarCollapsed ? 'Settings' : undefined}
+          aria-label={sidebarCollapsed ? 'Settings' : undefined}
+          aria-current={pathname.startsWith('/settings') ? 'page' : undefined}
           className={cn(
             'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition-colors',
             sidebarCollapsed && 'justify-center px-2'
@@ -138,10 +160,11 @@ export function Sidebar() {
       <button
         onClick={toggleSidebar}
         aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="absolute -right-3 top-20 h-6 w-6 rounded-full border border-gray-700 bg-gray-900 flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 transition-colors shadow-sm"
+        className="absolute -right-3 top-20 h-6 w-6 rounded-full border border-gray-700 bg-gray-900 hidden md:flex items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 transition-colors shadow-sm"
       >
         {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
       </button>
     </aside>
+    </>
   );
 }

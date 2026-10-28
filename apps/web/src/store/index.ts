@@ -4,8 +4,8 @@ import { devtools, persist } from 'zustand/middleware';
 import type {
   CalendarState, CalendarView, CalendarFilters,
   Employee, Schedule, Shift, SchedulingRule,
-  CopilotConversation, CopilotMessage, Organization,
-  UUID, ISODate, GenerationJob,
+  CopilotConversation, CopilotMessage,
+  UUID, ISODate,
 } from '@/types';
 import { addDays, addMonths } from 'date-fns';
 import { todayISO, toISODate, parseISODate } from '@/lib/dates';
@@ -23,11 +23,6 @@ interface CalendarStore extends CalendarState {
   setFilters: (filters: Partial<CalendarFilters>) => void;
   toggleCoverageOverlay: () => void;
   setHighlightedEmployee: (id: UUID | undefined) => void;
-  undoStack: Shift[][];
-  redoStack: Shift[][];
-  pushUndo: (snapshot: Shift[]) => void;
-  undo: () => void;
-  redo: () => void;
 }
 
 function navigateDate(date: ISODate, view: CalendarView, direction: 'prev' | 'next'): ISODate {
@@ -47,8 +42,6 @@ export const useCalendarStore = create<CalendarStore>()(
       showWeekends: true,
       showCoverageOverlay: false,
       filters: {},
-      undoStack: [],
-      redoStack: [],
 
       setView: (view) => set((s) => { s.view = view; }),
       setCurrentDate: (date) => set((s) => { s.currentDate = date; }),
@@ -84,22 +77,6 @@ export const useCalendarStore = create<CalendarStore>()(
       setHighlightedEmployee: (id) => set((s) => {
         s.highlightedEmployeeId = id;
       }),
-
-      pushUndo: (snapshot) => set((s) => {
-        s.undoStack.push(snapshot);
-        if (s.undoStack.length > 50) s.undoStack.shift();
-        s.redoStack = [];
-      }),
-
-      undo: () => set((s) => {
-        const snap = s.undoStack.pop();
-        if (snap) s.redoStack.push(snap);
-      }),
-
-      redo: () => set((s) => {
-        const snap = s.redoStack.pop();
-        if (snap) s.undoStack.push(snap);
-      }),
     })),
     { name: 'CalendarStore' }
   )
@@ -118,16 +95,11 @@ export interface Toast {
 }
 
 interface AppStore {
-  org: Organization | null;
-  setOrg: (org: Organization) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
-  activeScheduleId: UUID | null;
-  setActiveSchedule: (id: UUID | null) => void;
-  generationJob: GenerationJob | null;
-  setGenerationJob: (job: GenerationJob | null) => void;
-  commandPaletteOpen: boolean;
-  setCommandPaletteOpen: (open: boolean) => void;
+  // The slide-out menu on phones and small tablets.
+  mobileNavOpen: boolean;
+  setMobileNavOpen: (open: boolean) => void;
   copilotOpen: boolean;
   toggleCopilot: () => void;
   // Toast notifications
@@ -146,16 +118,10 @@ interface AppStore {
 export const useAppStore = create<AppStore>()(
   devtools(
     immer((set) => ({
-      org: null,
-      setOrg: (org) => set((s) => { s.org = org; }),
       sidebarCollapsed: false,
       toggleSidebar: () => set((s) => { s.sidebarCollapsed = !s.sidebarCollapsed; }),
-      activeScheduleId: null,
-      setActiveSchedule: (id) => set((s) => { s.activeScheduleId = id; }),
-      generationJob: null,
-      setGenerationJob: (job) => set((s) => { s.generationJob = job; }),
-      commandPaletteOpen: false,
-      setCommandPaletteOpen: (open) => set((s) => { s.commandPaletteOpen = open; }),
+      mobileNavOpen: false,
+      setMobileNavOpen: (open) => set((s) => { s.mobileNavOpen = open; }),
       copilotOpen: false,
       toggleCopilot: () => set((s) => { s.copilotOpen = !s.copilotOpen; }),
       toasts: [],

@@ -22,6 +22,7 @@ import { useAuth } from '@/context/auth-context';
 import { useOrgData } from '@/lib/org-data';
 import { getShifts, createShift, updateShift, deleteShift, getWeekSchedule, setWeekStatus } from '@/lib/db';
 import { rowToShift } from '@/lib/scheduling';
+import { generateFromPresets } from '@/lib/presets';
 import { toISODate, parseISODate, weekRange } from '@/lib/dates';
 import type { Shift } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -121,6 +122,7 @@ export default function SchedulePage() {
   const [publishing, setPublishing]     = useState(false);
   const [confirmPublish, setConfirmPublish] = useState<number | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const [fillingPreset, setFillingPreset] = useState(false);
 
   // The week the toolbar's Publish / Auto-Schedule act on.
   const week = weekRange(currentDate);
@@ -172,6 +174,35 @@ export default function SchedulePage() {
     setReloadTick(t => t + 1);
   }
 
+  // Pre-set → slots for the week shown, then straight into Auto-Schedule's
+  // preview so the admin can assign people in one pass.
+  async function fillFromPreset() {
+    if (!profile?.orgId) return;
+    setFillingPreset(true);
+    try {
+      const { created, skipped, seasons } = await generateFromPresets(profile.orgId, week.start, week.end);
+      if (!seasons.length) {
+        addToast({ type: 'warning', title: 'No season covers this week', message: 'Create a season and its pre-set schedule under Seasons first.' });
+        return;
+      }
+      if (created + skipped === 0) {
+        addToast({ type: 'warning', title: 'The pre-set is empty', message: `Add slots to ${seasons.join(', ')} under Seasons.` });
+        return;
+      }
+      addToast({
+        type: 'success',
+        title: created ? `Added ${created} slot${created === 1 ? '' : 's'} from ${seasons.join(', ')}` : 'This week already has its pre-set slots',
+        message: 'Review who Auto-Schedule picks, then confirm.',
+      });
+      refreshRange();
+      setShowAutoSchedule(true);
+    } catch (e: any) {
+      addToast({ type: 'error', title: 'Could not fill from the pre-set', message: e?.message });
+    } finally {
+      setFillingPreset(false);
+    }
+  }
+
   function handleCreateShift(date?: string) {
     setNewShiftDate(date);
     setShowNewShift(true);
@@ -198,6 +229,7 @@ export default function SchedulePage() {
         maxStaff: partial.maxStaff,
         color: partial.color,
         notes: partial.notes,
+        taskTypeId: partial.taskTypeId,
       });
       if (doc.date >= range.from && doc.date <= range.to) addCachedShift(rowToShift(doc));
       setSelectedShiftId(doc.id);
@@ -227,6 +259,7 @@ export default function SchedulePage() {
         isOpen: (selectedShift.assignedEmployeeIds?.length ?? 0) < (updated.minStaff ?? selectedShift.minStaff),
         color: updated.color,
         notes: updated.notes ?? null,
+        ...('taskTypeId' in updated ? { taskTypeId: updated.taskTypeId || null } : {}),
       });
       updateCachedShift(selectedShift.id, rowToShift(row));
       addToast({ type: 'success', title: 'Shift updated' });
@@ -314,6 +347,8 @@ export default function SchedulePage() {
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             <CalendarToolbar
+              onFillPreset={fillFromPreset}
+              isFillingPreset={fillingPreset}
               onGenerate={() => setShowAutoSchedule(true)}
               isGenerating={showAutoSchedule}
               scheduleStatus={weekStatus}

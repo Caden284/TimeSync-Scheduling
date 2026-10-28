@@ -12,8 +12,17 @@ TimeSync already has a lot of surface area: week, day, month, and timeline calen
 
 The gap is between **what the app looks like it does** and **what it actually does**. Several headline features are visual only, and the people who'd use it most — staff — have almost nothing that works for them yet.
 
-| Area | Before → After (Oct 25 update) |
+| Area | Before → After (Oct 28 update) |
 |---|---|
+| Security | **F → A−** — tenant isolation, open AI endpoint, admin self-promotion, PDF injection, and all dependency advisories fixed (`npm audit`: 0). |
+| Core scheduling | **C− → A−** — pre-set schedules (task slots per season), worker types and task eligibility, Auto-Schedule that respects all of it, real Publish. |
+| Rule engine | **D → A−** — hours, rest, consecutive days, overtime, staffing, availability, time off, task eligibility, and breaks; rules can target a worker type; unit-tested. |
+| Staff experience | **F → B+** — published schedule, coworkers, notifications, time off, availability, open-shift pickup, give-away requests, calendar feed. No coworker-to-coworker swaps yet. |
+| Phone / tablet use | **D → B** — slide-out menu, full-screen panels on phones, installable to the home screen. |
+| Trustworthiness of the UI | **D → A−** — demo data and decorative controls removed; notifications are real. |
+| Engineering health | **C → B+** — Next.js 15.5 / React 19, dead apps removed, README matches what ships, CI runs type-check, unit tests, build, and database access-rule tests. |
+
+---|---|
 | Security | **F → A−** — tenant isolation, open AI endpoint, admin self-promotion, PDF injection, and all dependency advisories fixed (`npm audit`: 0). |
 | Core scheduling | **C− → B+** — assign/remove staff with conflict checks, Auto-Schedule, real Publish. |
 | Rule engine | **D → B+** — hours, rest, consecutive days, overtime, staffing, availability, and time off are enforced; rule types that need missing data are labeled. |
@@ -167,6 +176,15 @@ It works end-to-end with real database tools, which is a genuine strength. To ma
 | PDF export injection (5.2) | ✅ Escaped |
 | Staff can't request time off or set availability (§3 items 2–3) | ✅ On My Schedule |
 | Copilot loop drops text / no reply at step limit; told it works for a demo hospital (§6) | ✅ Fixed; context loads from the database |
+| Copilot on a previous-generation model, fake typing (§6) | ✅ Claude Opus 5.5 with real streaming, explicit effort, validated tool inputs, and server-side refusal fallback; can fill a whole week through the same planner as Auto-Schedule |
+| Staff can't pick up open shifts or give shifts away (§3 items 4–5) | ✅ Open-shift pickup (every rule re-checked on the server) and give-away requests that admins approve on Time Off → Shift give-aways. Coworker-to-coworker swaps are still to do. |
+| No calendar feed (§3 item 7) | ✅ Private iCal link on My Schedule (Google, Apple, Outlook), replaceable at any time |
+| Admin pages unusable on a phone (4.1) | ✅ Slide-out menu, wrapping toolbars, full-screen shift panel and Copilot, phone layouts for Settings and Seasons, home-screen install (web app manifest) |
+| Accessibility (4.2) | ✅ Labels on icon-only buttons, switches announce on/off, `confirm()` pop-ups replaced with an in-app dialog, dialogs close with Escape and manage focus. Low-contrast small text still needs a pass. |
+| No tests or CI; dead `apps/api` and `apps/scheduler`; README describes things that don't exist (§7) | ✅ Rule-engine unit tests and database access-rule tests run in GitHub Actions with type-check and build; dead apps and the stale API spec removed; README rewritten; unused store state (undo/redo, command palette) removed |
+| No browser icon | ✅ Favicon, app icon, and home-screen icon |
+
+**Still open** (outside the code, or next up): turn on CAPTCHA and leaked-password protection in the Supabase dashboard (5.3); connect an email provider before relying on password-reset or email notifications (5.4); coworker-to-coworker swaps; email/push notifications; a contrast pass on small gray text; generated database types (§7); a server-side sign-in redirect (5.4, needs cookie-based sessions).
 
 Supabase project **TimeSync** (`mnugebtlenlnkiinsyhn`, us-east-1) is live with the schema applied. Supabase's security checker reports one intentional warning (the sign-up function is callable by signed-in users by design). Setup steps: [`docs/SUPABASE_SETUP.md`](SUPABASE_SETUP.md).
 

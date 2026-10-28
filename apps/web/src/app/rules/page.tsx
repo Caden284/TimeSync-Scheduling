@@ -5,8 +5,10 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { confirmDialog } from '@/components/ui/confirm-dialog';
 import { useAppStore, useRulesStore } from '@/store';
 import { useAuth } from '@/context/auth-context';
+import { useOrgData } from '@/lib/org-data';
 import { getRules, createRule, updateRule as dbUpdateRule, toggleRule as dbToggleRule, deleteRule as dbDeleteRule } from '@/lib/db';
 import { RULE_PARAMS, isRuleEnforced, ruleValue } from '@/lib/rule-engine';
 import { cn } from '@/lib/utils';
@@ -29,6 +31,7 @@ const RULE_TYPE_ICONS: Record<string, string> = {
 export default function RulesPage() {
   const { copilotOpen, addToast } = useAppStore();
   const { profile } = useAuth();
+  const { departments, workerTypes } = useOrgData();
   const { rules, setOrgRules, addRule: storeAddRule, toggleRule: storeToggle, deleteRule: storeDelete, updateRule: storeUpdate } = useRulesStore();
   const [selected, setSelected] = useState<SchedulingRule | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -67,7 +70,7 @@ export default function RulesPage() {
 
   async function deleteRule(id: string) {
     const rule = rules.find(r => r.id === id);
-    if (!rule || !confirm(`Delete "${rule.name}"? This cannot be undone.`)) return;
+    if (!rule || !(await confirmDialog({ title: `Delete "${rule.name}"?`, message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setDeleting(id);
     storeDelete(id);
     if (selected?.id === id) setSelected(null);
@@ -90,6 +93,7 @@ export default function RulesPage() {
         priority: rule.priority, weight: rule.weight,
         parameters: rule.parameters as Record<string, unknown>,
         scopeDepts: rule.scopeDepts,
+        scopeWorkerTypes: rule.scopeWorkerTypes,
       });
       storeAddRule(saved as unknown as SchedulingRule);
       addToast({ type: 'success', title: 'Rule created', message: rule.name });
@@ -178,7 +182,12 @@ export default function RulesPage() {
                 }} />
 
                 <Section title="Scope">
-                  <InfoRow label="Departments" value={selected.scopeDepts?.length ? `${selected.scopeDepts.length} dept(s)` : 'All departments'} />
+                  <InfoRow label="People" value={selected.scopeWorkerTypes?.length
+                    ? selected.scopeWorkerTypes.map(id => workerTypes.find(w => w.id === id)?.name ?? 'Unknown').join(', ')
+                    : 'Everyone'} />
+                  <InfoRow label="Departments" value={selected.scopeDepts?.length
+                    ? selected.scopeDepts.map(id => departments.find(d => d.id === id)?.name ?? 'Unknown').join(', ')
+                    : 'All departments'} />
                 </Section>
 
                 <Section title="Status">

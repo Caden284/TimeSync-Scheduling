@@ -23,10 +23,10 @@ const RULE_TYPES = [
 ];
 
 export function NewRuleModal({ onClose, onSaved }: Props) {
-  const { departments } = useOrgData();
+  const { departments, workerTypes } = useOrgData();
   const [form, setForm] = useState({
     ruleType: 'MAX_HOURS_WEEK', constraintType: 'hard' as 'hard' | 'soft',
-    name: '', description: '', value: String(RULE_PARAMS.MAX_HOURS_WEEK.defaultValue), priority: '50', departmentId: '',
+    name: '', description: '', value: String(RULE_PARAMS.MAX_HOURS_WEEK.defaultValue), priority: '50', departmentId: '', workerTypeId: '',
   });
   const [error, setError] = useState('');
   const type = RULE_TYPES.find(t => t.value === form.ruleType)!;
@@ -55,6 +55,7 @@ export function NewRuleModal({ onClose, onSaved }: Props) {
       conditions: [],
       parameters: meta ? { [meta.key]: n } : {},
       scopeDepts: form.departmentId ? [form.departmentId] : [],
+      scopeWorkerTypes: form.workerTypeId ? [form.workerTypeId] : [],
       createdAt: new Date().toISOString(),
     });
     onClose();
@@ -107,13 +108,26 @@ export function NewRuleModal({ onClose, onSaved }: Props) {
           </div>
         </div>
 
-        {departments.length > 0 && (
-          <div>
-            <label className={labelCls}>Applies to</label>
-            <select value={form.departmentId} onChange={e => set('departmentId', e.target.value)} className={inputCls}>
-              <option value="">All departments</option>
-              {departments.map(d => <option key={d.id} value={d.id}>{d.name} only</option>)}
-            </select>
+        {(departments.length > 0 || workerTypes.length > 0) && (
+          <div className="grid grid-cols-2 gap-3">
+            {workerTypes.length > 0 && (
+              <div>
+                <label className={labelCls} htmlFor="rule-worker-type">Applies to people</label>
+                <select id="rule-worker-type" value={form.workerTypeId} onChange={e => set('workerTypeId', e.target.value)} className={inputCls}>
+                  <option value="">Everyone</option>
+                  {workerTypes.map(w => <option key={w.id} value={w.id}>{w.name} only</option>)}
+                </select>
+              </div>
+            )}
+            {departments.length > 0 && (
+              <div>
+                <label className={labelCls} htmlFor="rule-dept">Applies to shifts in</label>
+                <select id="rule-dept" value={form.departmentId} onChange={e => set('departmentId', e.target.value)} className={inputCls}>
+                  <option value="">All departments</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.name} only</option>)}
+                </select>
+              </div>
+            )}
           </div>
         )}
 

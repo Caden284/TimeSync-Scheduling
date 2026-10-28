@@ -16,7 +16,7 @@ interface EditShiftModalProps {
 }
 
 export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditShiftModalProps) {
-  const { departments, locations } = useOrgData();
+  const { departments, locations, taskTypes } = useOrgData();
   const [form, setForm] = useState({
     title:        shift.title ?? '',
     date:         shift.date,
@@ -29,6 +29,7 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
     shiftType:    shift.shiftType,
     notes:        shift.notes ?? '',
     color:        shift.color ?? '#6366f1',
+    taskTypeId:   shift.taskTypeId ?? '',
   });
 
   function update(key: string, value: string) {
@@ -53,6 +54,7 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
       maxStaff:        form.maxStaff ? Number(form.maxStaff) : undefined,
       notes:           form.notes || undefined,
       color:           form.color,
+      ...(taskTypes.length ? { taskTypeId: form.taskTypeId || undefined } : {}),
     } as Partial<Shift>);
     onClose();
   }
@@ -112,6 +114,15 @@ export function EditShiftModal({ shift, mode, onSave, onDelete, onClose }: EditS
             <input type="text" value={form.title} onChange={e => update('title', e.target.value)}
               placeholder="e.g. ICU Day Shift" className={inputCls} />
           </FormField>
+
+          {taskTypes.length > 0 && (
+            <FormField label="Task">
+              <select value={form.taskTypeId} onChange={e => update('taskTypeId', e.target.value)} className={inputCls} aria-label="Task">
+                <option value="">No task (anyone)</option>
+                {taskTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.isBreak ? ' (break)' : ''}</option>)}
+              </select>
+            </FormField>
+          )}
 
           {/* Date + Times */}
           <div className="grid grid-cols-3 gap-3">

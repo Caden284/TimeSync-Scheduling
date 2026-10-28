@@ -1,7 +1,7 @@
 'use client';
 
 import type { Shift, ShiftAssignment, EmployeeSummary } from '@/types';
-import { getShifts, getEmployees, getRules, getTimeOffInRange, getAvailabilityOverrides } from './db';
+import { getShifts, getEmployees, getRules, getTimeOffInRange, getAvailabilityOverrides, getTaskTypes, getWorkerTypes } from './db';
 import { addDaysISO } from './dates';
 import { generateColor } from './utils';
 import { shiftHours, type EngineContext, type EngineEmployee, type EngineShift } from './rule-engine';
@@ -57,6 +57,8 @@ export function rowToShift(doc: any, employeeColors?: Map<string, string>): Shif
     assignments,
     assignedEmployeeIds: ids,
     assignedEmployeeNames: names,
+    taskTypeId: doc.taskTypeId ?? undefined,
+    preferredEmployeeIds: doc.preferredEmployeeIds ?? [],
     metadata: {},
     createdAt: doc.createdAt,
     department: doc.departmentId || doc.departmentName
@@ -81,6 +83,8 @@ export function toEngineShift(s: Shift | any): EngineShift {
     maxStaff: s.maxStaff,
     assignedEmployeeIds: s.assignedEmployeeIds ?? s.assignments?.map((a: ShiftAssignment) => a.employeeId) ?? [],
     assignedEmployeeNames: s.assignedEmployeeNames ?? [],
+    taskTypeId: s.taskTypeId ?? null,
+    preferredEmployeeIds: s.preferredEmployeeIds ?? [],
   };
 }
 
@@ -91,6 +95,7 @@ export function toEngineEmployee(e: any): EngineEmployee {
     lastName: e.lastName ?? '',
     role: e.role,
     isActive: e.isActive,
+    workerTypeId: e.workerTypeId ?? null,
     weeklyAvailability: e.weeklyAvailability,
   };
 }
@@ -101,18 +106,22 @@ export function toEngineEmployee(e: any): EngineEmployee {
 export async function loadSchedulingContext(orgId: string, from: string, to: string) {
   const wFrom = addDaysISO(from, -7);
   const wTo = addDaysISO(to, 7);
-  const [shiftRows, employees, rules, timeOff, overrides] = await Promise.all([
+  const [shiftRows, employees, rules, timeOff, overrides, taskTypes, workerTypes] = await Promise.all([
     getShifts(orgId, wFrom, wTo),
     getEmployees(orgId),
     getRules(orgId),
     getTimeOffInRange(orgId, wFrom, wTo),
     getAvailabilityOverrides(orgId, wFrom, wTo),
+    getTaskTypes(orgId).catch(() => []),
+    getWorkerTypes(orgId).catch(() => []),
   ]);
   const ctx: EngineContext = {
     shifts: shiftRows.map(toEngineShift),
     timeOff: timeOff.map((t: any) => ({ employeeId: t.employeeId, startDate: t.startDate, endDate: t.endDate, status: t.status, leaveType: t.leaveType })),
     overrides: overrides.map((o: any) => ({ employeeId: o.employeeId, date: o.date, isAvailable: o.isAvailable, altStartTime: o.altStartTime, altEndTime: o.altEndTime, reason: o.reason })),
     rules: rules.map(r => ({ ...r, constraintType: r.constraintType })),
+    taskTypes,
+    workerTypes,
   };
   return { ctx, employees, engineEmployees: employees.map(toEngineEmployee) };
 }

@@ -26,7 +26,7 @@ const COLORS = ['#6366f1','#ef4444','#f97316','#22c55e','#06b6d4','#8b5cf6','#f5
 const inputCls = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors';
 
 export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalProps) {
-  const { departments, locations } = useOrgData();
+  const { departments, locations, taskTypes } = useOrgData();
   const today = todayISO();
 
   const [form, setForm] = useState({
@@ -43,7 +43,18 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
     isOpen:       false,
     notes:        '',
     color:        '#6366f1',
+    taskTypeId:   '',
   });
+
+  function pickTask(id: string) {
+    const task = taskTypes.find(t => t.id === id);
+    const previous = taskTypes.find(t => t.id === form.taskTypeId);
+    setForm(prev => ({
+      ...prev, taskTypeId: id,
+      color: task?.color ?? prev.color,
+      title: task && (!prev.title || prev.title === previous?.name) ? task.name : prev.title,
+    }));
+  }
 
   function update(key: string, value: string | boolean) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -71,6 +82,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
       title:          form.title || undefined,
       notes:          form.notes || undefined,
       color:          form.color,
+      taskTypeId:     form.taskTypeId || undefined,
       department:     dept ? { id: dept.id, name: dept.name, color: dept.color, orgId: dept.orgId, isActive: true } : undefined,
       location:       loc  ? { id: loc.id,  name: loc.name,  orgId: loc.orgId, isActive: true } : undefined,
     });
@@ -84,7 +96,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div role="dialog" aria-modal="true" aria-label="New shift" className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
@@ -93,7 +105,7 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
             </div>
             <h2 className="text-base font-bold text-gray-900">New Shift</h2>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+          <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -129,6 +141,16 @@ export function NewShiftModal({ defaultDate, onSave, onClose }: NewShiftModalPro
             <input type="text" value={form.title} onChange={e => update('title', e.target.value)}
               placeholder="e.g. Morning Shift, Day Nurse, Cashier..." className={inputCls} autoFocus />
           </div>
+
+          {taskTypes.length > 0 && (
+            <div>
+              <label htmlFor="new-shift-task" className="block text-xs font-semibold text-gray-700 mb-1.5">Task</label>
+              <select id="new-shift-task" value={form.taskTypeId} onChange={e => pickTask(e.target.value)} className={inputCls}>
+                <option value="">No task (anyone)</option>
+                {taskTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.isBreak ? ' (break)' : ''}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* Date + Times */}
           <div className="grid grid-cols-3 gap-3">

@@ -5,9 +5,9 @@ import { Zap, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/auth-context';
-import { setShiftAssignments } from '@/lib/db';
+import { setManyShiftAssignments } from '@/lib/db';
 import { loadSchedulingContext } from '@/lib/scheduling';
-import { autoFill, staffTarget, type AutoFillResult } from '@/lib/rule-engine';
+import { autoFill, staffTarget, workHours, type AutoFillResult, type EngineContext } from '@/lib/rule-engine';
 
 interface Props {
   weekStart: string;
@@ -27,6 +27,8 @@ export function AutoScheduleModal({ weekStart, weekEnd, weekLabel, onClose, onAp
   const [error, setError]     = useState('');
   const [applying, setApplying] = useState(false);
   const [empNames, setEmpNames] = useState<Map<string, string>>(new Map());
+  const [hours, setHours] = useState<{ name: string; hours: number }[]>([]);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     if (!profile?.orgId) return;
@@ -37,8 +39,11 @@ export function AutoScheduleModal({ weekStart, weekEnd, weekLabel, onClose, onAp
           s.assignedEmployeeIds.length < staffTarget(s, ctx.rules));
         setLabels(new Map(ctx.shifts.map(s => [s.id, `${s.title || 'Shift'} · ${fmtDay(s.date)} ${s.startTime.slice(0, 5)}–${s.endTime.slice(0, 5)}`])));
         setMinStaff(new Map(ctx.shifts.map(s => [s.id, s.minStaff ?? 1])));
-        setEmpNames(new Map(engineEmployees.map(e => [e.id, `${e.firstName} ${e.lastName}`.trim()])));
-        setPlan(autoFill(targets, engineEmployees, ctx));
+        const names = new Map(engineEmployees.map(e => [e.id, `${e.firstName} ${e.lastName}`.trim()]));
+        setEmpNames(names);
+        const result = autoFill(targets, engineEmployees, ctx);
+        setPlan(result);
+        setHours(weekHoursAfter(ctx, result, weekStart, weekEnd, names));
       })
       .catch(e => setError(e?.message ?? 'Could not load the schedule.'));
   }, [profile?.orgId, weekStart, weekEnd]);
@@ -47,11 +52,7 @@ export function AutoScheduleModal({ weekStart, weekEnd, weekLabel, onClose, onAp
     if (!plan) return;
     setApplying(true); setError('');
     try {
-      const rows = [];
-      for (const c of plan.changes) {
-        rows.push(await setShiftAssignments(c.shiftId, c.employeeIds, c.employeeNames, minStaff.get(c.shiftId) ?? 1));
-      }
-      onApplied(rows);
+      onApplied(await setManyShiftAssignments(plan.changes.map(c => ({ ...c, minStaff: minStaff.get(c.shiftId) ?? 1 }))));
     } catch (e: any) {
       setError(e?.message ?? 'Saving failed part-way. Reload to see what was saved.');
       setApplying(false);
@@ -86,14 +87,27 @@ export function AutoScheduleModal({ weekStart, weekEnd, weekLabel, onClose, onAp
       {plan && !nothingToDo && (
         <div className="space-y-5">
           <p className="text-xs text-gray-500">
-            Picks the least-busy available person for each open spot. Hard rules are never broken;
-            soft-rule warnings are avoided when anyone else is free.
+            Only people allowed to do each task are picked. It keeps people in continuous blocks, prefers each
+            slot&apos;s usual people, spreads hours fairly, and gives breaks to whoever works through them. Hard rules
+            are never broken; soft-rule warnings are avoided when anyone else is free.
           </p>
+          {hours.length > 0 && (
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Hours this week, after assigning</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {hours.map(h => (
+                  <span key={h.name} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700">
+                    {h.name} <span className="font-semibold">{h.hours.toFixed(1)}h</span>
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
           {plan.changes.length > 0 && (
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Will assign</h3>
               <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-                {plan.changes.map(c => (
+                {(showAll ? plan.changes : plan.changes.slice(0, LIST_LIMIT)).map(c => (
                   <li key={c.shiftId} className="px-3 py-2 text-sm flex items-start gap-2">
                     <CheckCircle2 size={14} className="text-green-500 mt-0.5 shrink-0" />
                     <div className="min-w-0">
@@ -103,6 +117,11 @@ export function AutoScheduleModal({ weekStart, weekEnd, weekLabel, onClose, onAp
                   </li>
                 ))}
               </ul>
+              {!showAll && plan.changes.length > LIST_LIMIT && (
+                <button onClick={() => setShowAll(true)} className="mt-2 text-xs font-medium text-indigo-600 hover:underline">
+                  Show all {plan.changes.length}
+                </button>
+              )}
             </section>
           )}
           {plan.unfilled.length > 0 && (
@@ -125,6 +144,21 @@ export function AutoScheduleModal({ weekStart, weekEnd, weekLabel, onClose, onAp
       )}
     </Modal>
   );
+}
+
+const LIST_LIMIT = 60;
+
+// Worked hours per person in the week once the plan is applied (breaks excluded).
+function weekHoursAfter(ctx: EngineContext, plan: AutoFillResult, from: string, to: string, names: Map<string, string>) {
+  const changed = new Map(plan.changes.map(c => [c.shiftId, c.employeeIds]));
+  const totals = new Map<string, number>();
+  for (const s of ctx.shifts) {
+    if (s.date < from || s.date > to) continue;
+    for (const id of changed.get(s.id) ?? s.assignedEmployeeIds) totals.set(id, (totals.get(id) ?? 0) + workHours(ctx, s));
+  }
+  return [...totals.entries()]
+    .map(([id, hours]) => ({ name: names.get(id) ?? 'Employee', hours }))
+    .sort((a, b) => b.hours - a.hours);
 }
 
 function fmtDay(iso: string) {

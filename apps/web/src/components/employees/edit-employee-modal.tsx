@@ -34,7 +34,7 @@ function parseAvailability(raw?: Partial<WeeklyAvailability> | null): WeeklyAvai
 }
 
 export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Props) {
-  const { departments } = useOrgData();
+  const { departments, workerTypes } = useOrgData();
   const [tab, setTab] = useState<'info' | 'availability'>('info');
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -48,6 +48,7 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
     departmentId: employee.departmentId ?? employee.primaryDept?.id ?? '',
     employmentType: employee.employmentType ?? 'full_time',
     payRate: employee.payRate ? String(employee.payRate) : '',
+    workerTypeId: employee.workerTypeId ?? '',
   });
   const [avail, setAvail] = useState<WeeklyAvailability>(
     parseAvailability(employee.weeklyAvailability)
@@ -80,9 +81,10 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
         departmentId: dept?.id ?? null, departmentName: dept?.name ?? null,
         employmentType: form.employmentType,
         payRate,
+        ...(workerTypes.length ? { workerTypeId: form.workerTypeId || null } : {}),
       });
       await updateEmployeeAvailability(empId, avail);
-      onSaved({ ...employee, ...form, departmentName: dept?.name ?? null, payRate, weeklyAvailability: avail });
+      onSaved({ ...employee, ...form, workerTypeId: form.workerTypeId || null, departmentName: dept?.name ?? null, payRate, weeklyAvailability: avail });
       onClose();
     } catch (e: any) { setError(e?.message ?? 'Save failed.'); }
     finally { setSaving(false); }
@@ -153,6 +155,13 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
             <input type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} className={inputCls} /></div>
           <div><label className={labelCls}>Job Title / Role</label>
             <input value={form.role} onChange={e => set('role', e.target.value)} className={inputCls} /></div>
+<div><label className={labelCls}>Worker Type</label>
+            <select value={form.workerTypeId} onChange={e => set('workerTypeId', e.target.value)} className={inputCls}>
+              <option value="">Not set</option>
+              {workerTypes.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-1">Decides which tasks they can be scheduled for.</p>
+          </div>
           <div><label className={labelCls}>Department</label>
             <select value={form.departmentId} onChange={e => set('departmentId', e.target.value)} className={inputCls}>
               <option value="">No department</option>
@@ -188,6 +197,9 @@ export function EditEmployeeModal({ employee, onClose, onSaved, onDeleted }: Pro
               )}>
                 <button
                   onClick={() => toggleDay(key)}
+                  role="switch"
+                  aria-checked={isOn}
+                  aria-label={`Available on ${label}`}
                   className={cn(
                     'relative w-8 h-4.5 rounded-full transition-colors flex-shrink-0',
                     isOn ? 'bg-indigo-500' : 'bg-gray-300'

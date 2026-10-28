@@ -37,7 +37,7 @@ function ToastItem({ id, type, title, message }: { id: string; type: 'success'|'
         <p className="text-sm font-semibold text-gray-900">{title}</p>
         {message && <p className="text-xs text-gray-500 mt-0.5">{message}</p>}
       </div>
-      <button onClick={() => removeToast(id)} className="text-gray-300 hover:text-gray-500 flex-shrink-0 mt-0.5">
+      <button onClick={() => removeToast(id)} aria-label="Dismiss" className="text-gray-300 hover:text-gray-500 flex-shrink-0 mt-0.5">
         <X size={13} />
       </button>
     </div>

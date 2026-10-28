@@ -222,6 +222,8 @@ export interface Shift {
   assignments: ShiftAssignment[];
   assignedEmployeeIds?: UUID[];
   assignedEmployeeNames?: string[];
+  taskTypeId?: UUID;
+  preferredEmployeeIds?: UUID[];
   metadata: Record<string, unknown>;
   createdAt: ISODateTime;
 }
@@ -312,6 +314,7 @@ export interface SchedulingRule {
   scopeDepts?: UUID[];
   scopeLocations?: UUID[];
   scopeRoles?: UUID[];
+  scopeWorkerTypes?: UUID[];
   scopeEmpTypes?: EmploymentType[];
   scopeEmpTags?: string[];
   scopeShiftTypes?: ShiftType[];
@@ -502,6 +505,41 @@ export interface ShiftTemplate {
   daysOfWeek: number[]; // 0=Sun…6=Sat
   isActive: boolean;
   notes?: string;
+  taskTypeId?: UUID;
+  preferredEmployeeIds: UUID[];
+  createdAt: ISODateTime;
+}
+
+// Org-defined kinds of worker (Staff and Student by default).
+export interface WorkerType {
+  id: UUID;
+  orgId: UUID;
+  name: string;
+  color: string;
+  sortOrder: number;
+}
+
+// What a shift slot is for, and who may do it. Empty lists mean anyone.
+export interface TaskType {
+  id: UUID;
+  orgId: UUID;
+  name: string;
+  description?: string;
+  color: string;
+  isBreak: boolean;
+  allowedWorkerTypeIds: UUID[];
+  allowedEmployeeIds: UUID[];
+}
+
+export interface ShiftRequest {
+  id: UUID;
+  orgId: UUID;
+  shiftId: UUID;
+  employeeId: UUID;
+  employeeName: string;
+  note?: string;
+  status: 'pending' | 'approved' | 'denied' | 'cancelled';
+  decidedAt?: ISODateTime;
   createdAt: ISODateTime;
 }
 

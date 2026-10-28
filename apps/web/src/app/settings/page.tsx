@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { Button } from '@/components/ui/button';
+import { confirmDialog } from '@/components/ui/confirm-dialog';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { useAppStore } from '@/store';
@@ -15,11 +16,16 @@ import {
   getOrgUsers, updateUserProfile,
 } from '@/lib/db';
 import { cn, getContrastColor } from '@/lib/utils';
-import { Building2, Users, Layers, Check, Plus, Trash2, Loader2 } from 'lucide-react';
+import { COLORS, Field, SectionHeader, SettingsCard, inputCls } from '@/components/settings/parts';
+import { WorkerTypesSection } from '@/components/settings/worker-types-section';
+import { TasksSection } from '@/components/settings/tasks-section';
+import { Building2, Users, Layers, Check, Plus, Trash2, Loader2, IdCard, ListChecks } from 'lucide-react';
 
 const NAV_SECTIONS = [
   { id: 'organization', label: 'Organization',   icon: Building2 },
   { id: 'departments',  label: 'Departments',    icon: Layers },
+  { id: 'worker-types', label: 'Worker Types',   icon: IdCard },
+  { id: 'tasks',        label: 'Tasks',          icon: ListChecks },
   { id: 'users',        label: 'Users & Access', icon: Users },
 ] as const;
 
@@ -35,7 +41,6 @@ const VERTICALS = [
   ['events', 'Events'], ['manufacturing', 'Manufacturing'], ['nonprofit', 'Nonprofit'], ['call_center', 'Call Center'],
   ['hotel', 'Hotel'], ['airline', 'Airline'], ['construction', 'Construction'], ['other', 'Other'],
 ];
-const COLORS = ['#6366f1', '#ef4444', '#f97316', '#22c55e', '#06b6d4', '#8b5cf6', '#ec4899', '#f59e0b'];
 
 export default function SettingsPage() {
   return <AuthGuard><Settings /></AuthGuard>;
@@ -45,18 +50,24 @@ function Settings() {
   const { copilotOpen } = useAppStore();
   const [section, setSection] = useState<SectionId>('organization');
 
+  // Deep links such as /settings?section=tasks.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('section');
+    if (NAV_SECTIONS.some(s => s.id === wanted)) setSection(wanted as SectionId);
+  }, []);
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar title="Settings" subtitle="Manage your organization" />
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <nav className="w-52 shrink-0 border-r border-gray-200 bg-white overflow-y-auto py-4 px-2">
+        <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+          <nav aria-label="Settings sections" className="flex md:block shrink-0 gap-1 md:w-52 border-b md:border-b-0 md:border-r border-gray-200 bg-white overflow-x-auto md:overflow-y-auto py-2 md:py-4 px-2">
             {NAV_SECTIONS.map(sec => {
               const Icon = sec.icon;
               return (
-                <button key={sec.id} onClick={() => setSection(sec.id)}
-                  className={cn('flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left',
+                <button key={sec.id} onClick={() => setSection(sec.id)} aria-current={section === sec.id ? 'page' : undefined}
+                  className={cn('flex md:w-full shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left whitespace-nowrap',
                     section === sec.id ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900')}>
                   <Icon size={15} className="shrink-0" />
                   {sec.label}
@@ -64,10 +75,12 @@ function Settings() {
               );
             })}
           </nav>
-          <div className="flex-1 overflow-y-auto p-8">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8">
             <div className="max-w-2xl space-y-6">
               {section === 'organization' && <OrganizationSection />}
               {section === 'departments' && <DepartmentsSection />}
+              {section === 'worker-types' && <WorkerTypesSection />}
+              {section === 'tasks' && <TasksSection />}
               {section === 'users' && <UsersSection />}
             </div>
           </div>
@@ -178,7 +191,7 @@ function DepartmentsSection() {
   }
 
   async function remove(id: string, deptName: string) {
-    if (!window.confirm(`Delete the ${deptName} department? Employees and shifts keep their current label.`)) return;
+    if (!(await confirmDialog({ title: `Delete the ${deptName} department?`, message: 'Employees and shifts keep their current label.', confirmLabel: 'Delete', danger: true }))) return;
     setBusy(id);
     try {
       await deleteDepartment(id);
@@ -367,32 +380,5 @@ function InviteUserForm({ employees, onCreated }: { employees: any[]; onCreated:
       </Field>
       <Button type="submit" variant="primary" size="sm" loading={status === 'saving'}>Create User</Button>
     </form>
-  );
-}
-
-// ── Shared bits ──────────────────────────────────────────────────────────────
-
-const inputCls = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
-
-function SectionHeader({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div className="border-b border-gray-200 pb-4">
-      <h2 className="text-base font-bold text-gray-900">{title}</h2>
-      <p className="text-sm text-gray-500 mt-0.5">{desc}</p>
-    </div>
-  );
-}
-
-function SettingsCard({ children }: { children: React.ReactNode }) {
-  return <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">{children}</div>;
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex-1">
-      <label className="block text-xs font-semibold text-gray-700 mb-1.5">{label}</label>
-      {children}
-      {hint && <p className="text-[10px] text-gray-400 mt-1">{hint}</p>}
-    </div>
   );
 }

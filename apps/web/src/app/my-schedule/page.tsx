@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import { addWeeks, subWeeks, format } from 'date-fns';
 import { ChevronLeft, ChevronRight, Zap, LogOut, Clock, MapPin, Users, Plane, CalendarCog, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/auth-context';
-import { getShifts, getMyTimeOffRequests, createTimeOffRequest, getEmployee, setMyAvailability } from '@/lib/db';
+import {
+  getShifts, getMyTimeOffRequests, createTimeOffRequest, getEmployee, setMyAvailability,
+  getMyShiftRequests, requestShiftDrop, cancelShiftRequest,
+} from '@/lib/db';
+import { OpenShiftsCard, CalendarFeedCard, GiveAwayModal } from '@/components/my-schedule/staff-cards';
 import { todayISO, toISODate, parseISODate, weekRange, addDaysISO } from '@/lib/dates';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 import { Modal, inputCls, labelCls } from '@/components/ui/modal';
@@ -29,6 +33,9 @@ export default function MySchedulePage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [showTimeOff, setShowTimeOff] = useState(false);
   const [showAvailability, setShowAvailability] = useState(false);
+  const [dropRequests, setDropRequests] = useState<any[]>([]);
+  const [givingAway, setGivingAway] = useState<any | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const week = weekRange(weekBase);
   const weekLabel = `${format(parseISODate(week.start), 'MMM d')} – ${format(parseISODate(week.end), 'MMM d, yyyy')}`;
@@ -52,10 +59,12 @@ export default function MySchedulePage() {
       .then(rows => setShifts(rows.filter((s: any) => s.assignedEmployeeIds?.includes(employeeId))))
       .catch(() => setShifts([]))
       .finally(() => setFetching(false));
-  }, [profile?.orgId, employeeId, week.start]);
+  }, [profile?.orgId, employeeId, week.start, reloadTick]);
 
   function loadRequests() {
-    if (employeeId) getMyTimeOffRequests(employeeId).then(setRequests).catch(() => {});
+    if (!employeeId) return;
+    getMyTimeOffRequests(employeeId).then(setRequests).catch(() => {});
+    getMyShiftRequests(employeeId).then(setDropRequests).catch(() => {});
   }
   useEffect(loadRequests, [employeeId]);
 
@@ -152,6 +161,7 @@ export default function MySchedulePage() {
                           <p className="text-xs text-gray-700 text-center pt-2">–</p>
                         ) : dayShifts.map(s => {
                           const coworkers = (s.assignedEmployeeNames ?? []).filter((_: string, idx: number) => s.assignedEmployeeIds[idx] !== employeeId);
+                          const pendingDrop = dropRequests.find(r => r.shiftId === s.id && r.status === 'pending');
                           return (
                             <div key={s.id} className="rounded-lg p-2.5 text-xs" style={{ backgroundColor: (s.color ?? '#6366f1') + '25', borderLeft: `3px solid ${s.color ?? '#6366f1'}` }}>
                               <p className="font-semibold text-white truncate">{s.title ?? 'Shift'}</p>
@@ -164,6 +174,17 @@ export default function MySchedulePage() {
                               {coworkers.length > 0 && (
                                 <div className="flex items-start gap-1 mt-0.5 text-gray-400"><Users size={10} className="mt-0.5 shrink-0" /><span>With {coworkers.join(', ')}</span></div>
                               )}
+                              {s.date >= today && (pendingDrop ? (
+                                <div className="mt-1.5 flex items-center gap-2">
+                                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-300">Give-away requested</span>
+                                  <button onClick={async () => { await cancelShiftRequest(pendingDrop.id).catch(() => {}); loadRequests(); }}
+                                    className="text-gray-400 hover:text-white underline-offset-2 hover:underline">Cancel</button>
+                                </div>
+                              ) : (
+                                <button onClick={() => setGivingAway(s)} className="mt-1.5 text-gray-400 hover:text-white underline-offset-2 hover:underline">
+                                  Give away…
+                                </button>
+                              ))}
                             </div>
                           );
                         })}
@@ -207,6 +228,8 @@ export default function MySchedulePage() {
                 </div>
                 <p className="text-xs text-gray-500">Tell your manager which days and hours you can work. Scheduling uses it automatically.</p>
               </div>
+              {employeeId && <OpenShiftsCard onClaimed={() => setReloadTick(t => t + 1)} />}
+              {employeeId && <CalendarFeedCard employeeId={employeeId} />}
             </div>
           </div>
         </>
@@ -225,6 +248,17 @@ export default function MySchedulePage() {
             loadRequests();
           }}
         />
+      )}
+      {givingAway && profile && employeeId && (
+        <GiveAwayModal shift={givingAway} onClose={() => setGivingAway(null)}
+          onSubmit={async note => {
+            await requestShiftDrop({
+              orgId: profile.orgId, shiftId: givingAway.id, employeeId,
+              employeeName: `${profile.firstName} ${profile.lastName}`.trim() || profile.email, note,
+            });
+            setGivingAway(null);
+            loadRequests();
+          }} />
       )}
       {showAvailability && employeeId && (
         <AvailabilityModal employeeId={employeeId} onClose={() => setShowAvailability(false)} />

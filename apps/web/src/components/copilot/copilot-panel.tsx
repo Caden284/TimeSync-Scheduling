@@ -130,7 +130,7 @@ export function CopilotPanel({ onScheduleChanged }: { onScheduleChanged?: () => 
   }
 
   return (
-    <aside className="flex flex-col w-96 bg-white border-l border-gray-200 h-full shadow-xl">
+    <aside aria-label="AI Copilot" className="fixed inset-0 z-40 flex flex-col w-full bg-white h-full shadow-xl sm:static sm:z-auto sm:w-96 sm:border-l sm:border-gray-200">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 h-14 border-b border-gray-200 bg-gradient-to-r from-indigo-600 to-purple-600 shrink-0">
         <div className="h-7 w-7 rounded-lg bg-white/20 flex items-center justify-center">
@@ -223,7 +223,7 @@ export function CopilotPanel({ onScheduleChanged }: { onScheduleChanged?: () => 
               <RefreshCw size={12} className="animate-spin" />
             </button>
           ) : (
-            <button onClick={() => handleSend()} disabled={!input.trim()}
+            <button onClick={() => handleSend()} disabled={!input.trim()} aria-label="Send message"
               className={cn('h-7 w-7 rounded-lg flex items-center justify-center transition-all shrink-0',
                 input.trim() ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm' : 'bg-gray-200 text-gray-400 cursor-not-allowed')}>
               <Send size={12} />

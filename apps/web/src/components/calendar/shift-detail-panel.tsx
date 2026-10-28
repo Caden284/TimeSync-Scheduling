@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { X, Clock, MapPin, Users, AlertCircle, AlertTriangle, CheckCircle2, Ban, UserPlus, Search, Loader2 } from 'lucide-react';
+import { X, Clock, MapPin, Users, ListChecks, Coffee, AlertCircle, AlertTriangle, CheckCircle2, Ban, UserPlus, Search, Loader2 } from 'lucide-react';
 import type { Shift } from '@/types';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,8 @@ import { useAuth } from '@/context/auth-context';
 import { useAppStore } from '@/store';
 import { setShiftAssignments } from '@/lib/db';
 import { loadSchedulingContext, toEngineShift } from '@/lib/scheduling';
-import { checkAssignment, worstSeverity, staffTarget, type Conflict, type EngineContext, type EngineEmployee } from '@/lib/rule-engine';
+import { useOrgData } from '@/lib/org-data';
+import { checkAssignment, eligibilityLabel, worstSeverity, staffTarget, type Conflict, type EngineContext, type EngineEmployee } from '@/lib/rule-engine';
 
 interface ShiftDetailPanelProps {
   shift: Shift;
@@ -27,6 +28,8 @@ interface Candidate { emp: EngineEmployee; conflicts: Conflict[]; level: 'ok' | 
 export function ShiftDetailPanel({ shift, onClose, onEdit, onDelete, onShiftUpdated }: ShiftDetailPanelProps) {
   const { profile } = useAuth();
   const { addToast } = useAppStore();
+  const { taskTypes, workerTypes } = useOrgData();
+  const task = taskTypes.find(t => t.id === shift.taskTypeId);
   const color = shift.color ?? '#6366f1';
   const assignedIds = shift.assignedEmployeeIds ?? shift.assignments.map(a => a.employeeId);
   const assignedNames = shift.assignedEmployeeNames ?? [];
@@ -100,7 +103,7 @@ export function ShiftDetailPanel({ shift, onClose, onEdit, onDelete, onShiftUpda
   }
 
   return (
-    <aside className="flex flex-col w-full sm:w-80 bg-white border-l border-gray-200 h-full overflow-hidden">
+    <aside aria-label="Shift details" className="fixed inset-0 z-40 flex flex-col w-full bg-white sm:static sm:z-auto sm:w-80 sm:border-l sm:border-gray-200 h-full overflow-hidden">
       {/* Header */}
       <div
         className="flex items-start justify-between px-4 py-4 border-b border-gray-100"
@@ -131,6 +134,12 @@ export function ShiftDetailPanel({ shift, onClose, onEdit, onDelete, onShiftUpda
             <span className="text-sm font-medium text-gray-900">{formatShiftTime(shift.startTime, shift.endTime)}</span>
             <span className="text-xs text-gray-500 ml-1">({formatHours(shift.durationHours)})</span>
           </InfoRow>
+          {task && (
+            <InfoRow icon={task.isBreak ? <Coffee size={14} className="text-amber-500" /> : <ListChecks size={14} className="text-gray-400" />}>
+              <span className="text-sm text-gray-900">{task.name}</span>
+              <span className="text-xs text-gray-500 ml-1">· {eligibilityLabel(task, workerTypes)}</span>
+            </InfoRow>
+          )}
           {shift.location?.name && (
             <InfoRow icon={<MapPin size={14} className="text-gray-400" />}>
               <span className="text-sm text-gray-900">{shift.location.name}</span>

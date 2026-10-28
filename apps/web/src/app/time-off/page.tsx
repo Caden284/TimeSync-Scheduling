@@ -14,6 +14,7 @@ import { AuthGuard } from '@/components/auth/auth-guard';
 import { NewRequestModal } from '@/components/time-off/new-request-modal';
 import { useAuth } from '@/context/auth-context';
 import { getTimeOffRequests, updateTimeOffStatus, getEmployees } from '@/lib/db';
+import { ShiftRequestsPanel } from '@/components/time-off/shift-requests-panel';
 
 interface TimeOffRequest {
   id: string;
@@ -49,6 +50,13 @@ export default function TimeOffPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [actioning, setActioning] = useState<string | null>(null);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [section, setSection] = useState<'leave' | 'shifts'>('leave');
+  const [pendingDrops, setPendingDrops] = useState(0);
+
+  // Notification links open the give-away tab: /time-off?tab=shifts
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('tab') === 'shifts') setSection('shifts');
+  }, []);
 
   useEffect(() => {
     if (profile?.orgId) getEmployees(profile.orgId).then(setEmployees).catch(() => {});
@@ -120,8 +128,25 @@ export default function TimeOffPage() {
           }
         />
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <div role="tablist" aria-label="Request type" className="flex gap-1 mb-5 border-b border-gray-200">
+              {([['leave', 'Time off'], ['shifts', 'Shift give-aways']] as const).map(([id, text]) => (
+                <button key={id} role="tab" aria-selected={section === id} onClick={() => setSection(id)}
+                  className={cn('px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+                    section === id ? 'border-indigo-500 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700')}>
+                  {text}
+                  {id === 'shifts' && pendingDrops > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[11px] text-amber-700">{pendingDrops}</span>}
+                </button>
+              ))}
+            </div>
+            {/* Mounted while hidden so the pending count stays current. */}
+            {profile?.orgId && (
+              <div hidden={section !== 'shifts'}>
+                <ShiftRequestsPanel orgId={profile.orgId} onPendingCount={setPendingDrops} />
+              </div>
+            )}
+            <div hidden={section !== 'leave'}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
               {[
                 { label: 'Pending',  value: requests.filter(r => r.status === 'pending').length,  color: 'text-amber-600', bg: 'bg-amber-50',  border: 'border-amber-200' },
                 { label: 'Approved', value: requests.filter(r => r.status === 'approved').length, color: 'text-green-600', bg: 'bg-green-50',  border: 'border-green-200' },
@@ -145,7 +170,7 @@ export default function TimeOffPage() {
               ))}
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/60">
@@ -213,6 +238,7 @@ export default function TimeOffPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
             </div>
           </div>
           {copilotOpen && <CopilotPanel />}

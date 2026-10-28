@@ -328,7 +328,7 @@ function OnboardingWizard() {
                         placeholder={`Department ${i + 1} (e.g. Emergency Dept)`}
                         className={cn(inputCls, 'flex-1')} />
                       {departments.length > 1 && (
-                        <button onClick={() => removeDept(dept.id)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
+                        <button onClick={() => removeDept(dept.id)} aria-label={`Remove ${dept.name}`} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
                           <Trash2 size={14} />
                         </button>
                       )}
@@ -362,7 +362,7 @@ function OnboardingWizard() {
                           placeholder="State"
                           className={inputCls} />
                         {locations.length > 1 && (
-                          <button onClick={() => removeLocation(loc.id)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors shrink-0">
+                          <button onClick={() => removeLocation(loc.id)} aria-label={`Remove ${loc.name}`} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors shrink-0">
                             <Trash2 size={14} />
                           </button>
                         )}
@@ -396,7 +396,7 @@ function OnboardingWizard() {
                       </div>
                       <span className="text-xs font-semibold text-gray-700">Employee {i + 1}</span>
                       {staff.length > 1 && (
-                        <button onClick={() => removeStaff(member.id)} className="ml-auto p-1 text-gray-400 hover:text-red-500 transition-colors">
+                        <button onClick={() => removeStaff(member.id)} aria-label="Remove team member" className="ml-auto p-1 text-gray-400 hover:text-red-500 transition-colors">
                           <Trash2 size={13} />
                         </button>
                       )}

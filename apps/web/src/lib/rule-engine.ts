@@ -18,6 +18,22 @@ export interface EngineShift {
   maxStaff?: number | null;
   assignedEmployeeIds: string[];
   assignedEmployeeNames?: string[];
+  taskTypeId?: string | null;
+  preferredEmployeeIds?: string[] | null;  // "usually worked by" — preferred when eligible
+}
+
+// What a shift slot is for, and who may work it. Empty lists mean anyone.
+export interface EngineTaskType {
+  id: string;
+  name: string;
+  isBreak?: boolean | null;
+  allowedWorkerTypeIds?: string[] | null;
+  allowedEmployeeIds?: string[] | null;
+}
+
+export interface EngineWorkerType {
+  id: string;
+  name: string;
 }
 
 export interface EngineEmployee {
@@ -26,6 +42,7 @@ export interface EngineEmployee {
   lastName: string;
   role?: string | null;
   isActive?: boolean | null;
+  workerTypeId?: string | null;
   weeklyAvailability?: Record<string, { start: string; end: string } | undefined> | null;
 }
 
@@ -55,6 +72,7 @@ export interface EngineRule {
   scopeDepts?: string[] | null;
   scopeLocations?: string[] | null;
   scopeRoles?: string[] | null;
+  scopeWorkerTypes?: string[] | null;
 }
 
 export interface EngineContext {
@@ -62,6 +80,8 @@ export interface EngineContext {
   timeOff: EngineTimeOff[];
   overrides: EngineOverride[];
   rules: EngineRule[];
+  taskTypes?: EngineTaskType[];
+  workerTypes?: EngineWorkerType[];
 }
 
 export type Severity = 'block' | 'warn';
@@ -132,6 +152,46 @@ export function shiftHours(s: Pick<EngineShift, 'date' | 'startTime' | 'endTime'
   return (b - a) / 60;
 }
 
+// ── Tasks ────────────────────────────────────────────────────────────────────
+
+const taskIndex = new WeakMap<EngineTaskType[], Map<string, EngineTaskType>>();
+
+export function taskOf(ctx: Pick<EngineContext, 'taskTypes'>, shift: Pick<EngineShift, 'taskTypeId'>): EngineTaskType | undefined {
+  if (!shift.taskTypeId || !ctx.taskTypes) return undefined;
+  let map = taskIndex.get(ctx.taskTypes);
+  if (!map) { map = new Map(ctx.taskTypes.map(t => [t.id, t])); taskIndex.set(ctx.taskTypes, map); }
+  return map.get(shift.taskTypeId);
+}
+
+export const isBreakShift = (ctx: Pick<EngineContext, 'taskTypes'>, shift: Pick<EngineShift, 'taskTypeId'>) =>
+  !!taskOf(ctx, shift)?.isBreak;
+
+// Hours that count toward daily/weekly limits; breaks don't.
+export function workHours(ctx: Pick<EngineContext, 'taskTypes'>, s: EngineShift): number {
+  return isBreakShift(ctx, s) ? 0 : shiftHours(s);
+}
+
+// Who may work a task: listed people always may; otherwise anyone of an
+// allowed worker type. No lists at all means everyone.
+export function canDoTask(task: EngineTaskType | undefined, emp: Pick<EngineEmployee, 'id' | 'workerTypeId'>): boolean {
+  if (!task) return true;
+  const types = task.allowedWorkerTypeIds ?? [];
+  const people = task.allowedEmployeeIds ?? [];
+  if (!types.length && !people.length) return true;
+  return people.includes(emp.id) || (!!emp.workerTypeId && types.includes(emp.workerTypeId));
+}
+
+export function eligibilityLabel(task: EngineTaskType, workerTypes: EngineWorkerType[] = []): string {
+  const names = (task.allowedWorkerTypeIds ?? [])
+    .map(id => workerTypes.find(w => w.id === id)?.name)
+    .filter(Boolean) as string[];
+  const people = task.allowedEmployeeIds?.length ?? 0;
+  if (!names.length && !people) return 'Anyone';
+  const parts = names.length ? [names.join(' or ')] : [];
+  if (people) parts.push(`${people} named ${people === 1 ? 'person' : 'people'}`);
+  return parts.join(' + ');
+}
+
 function weekStartDay(iso: string): number {
   const n = dayNumber(iso);
   // 1970-01-01 was a Thursday; shift so weeks start on Sunday.
@@ -154,20 +214,26 @@ function ruleApplies(rule: EngineRule, shift: EngineShift, emp: EngineEmployee):
   if (rule.scopeDepts?.length && !rule.scopeDepts.includes(shift.departmentId ?? '')) return false;
   if (rule.scopeLocations?.length && !rule.scopeLocations.includes(shift.locationId ?? '')) return false;
   if (rule.scopeRoles?.length && !rule.scopeRoles.includes(emp.role ?? '')) return false;
+  if (rule.scopeWorkerTypes?.length && !rule.scopeWorkerTypes.includes(emp.workerTypeId ?? '')) return false;
   return true;
 }
 
 const severityOf = (rule: EngineRule): Severity => (rule.constraintType === 'hard' ? 'block' : 'warn');
 
+// Per-employee shift lists, kept by autoFill so large pre-set weeks stay fast.
+type IndexedContext = EngineContext & { byEmployee?: Map<string, EngineShift[]> };
+
 export function employeeShifts(ctx: EngineContext, employeeId: string, excludeShiftId?: string): EngineShift[] {
-  return ctx.shifts.filter(s => s.id !== excludeShiftId && s.assignedEmployeeIds.includes(employeeId));
+  const indexed = (ctx as IndexedContext).byEmployee;
+  const list = indexed ? indexed.get(employeeId) ?? [] : ctx.shifts.filter(s => s.assignedEmployeeIds.includes(employeeId));
+  return excludeShiftId ? list.filter(s => s.id !== excludeShiftId) : list;
 }
 
 export function weekHours(ctx: EngineContext, employeeId: string, isoInWeek: string, excludeShiftId?: string): number {
   const ws = weekStartDay(isoInWeek);
   return employeeShifts(ctx, employeeId, excludeShiftId)
     .filter(s => weekStartDay(s.date) === ws)
-    .reduce((sum, s) => sum + shiftHours(s), 0);
+    .reduce((sum, s) => sum + workHours(ctx, s), 0);
 }
 
 export function checkAssignment(shift: EngineShift, emp: EngineEmployee, ctx: EngineContext): Conflict[] {
@@ -185,9 +251,21 @@ export function checkAssignment(shift: EngineShift, emp: EngineEmployee, ctx: En
     out.push({ code: 'SHIFT_FULL', severity: 'block', message: `This shift is full (max ${shift.maxStaff}).` });
   }
 
+  const task = taskOf(ctx, shift);
+  if (task && !canDoTask(task, emp)) {
+    out.push({ code: 'TASK_ELIGIBILITY', severity: 'block',
+      message: `${task.name} is limited to ${eligibilityLabel(task, ctx.workerTypes)}.` });
+  }
+
   const [start, end] = interval(shift);
-  const hours = shiftHours(shift);
+  const hours = workHours(ctx, shift);
   const mine = employeeShifts(ctx, emp.id, shift.id);
+
+  // A break belongs to someone working right before or after it.
+  if (task?.isBreak && !mine.some(o => !isBreakShift(ctx, o) && (interval(o)[1] === start || interval(o)[0] === end))) {
+    out.push({ code: 'BREAK_NOT_ON_SHIFT', severity: 'warn',
+      message: `${name} isn't working right before or after this break.` });
+  }
 
   // Double-booking is never allowed.
   for (const other of mine) {
@@ -224,7 +302,7 @@ export function checkAssignment(shift: EngineShift, emp: EngineEmployee, ctx: En
 
   for (const r of byType('MAX_HOURS_DAY')) {
     const limit = ruleValue(r);
-    const total = mine.filter(s => s.date === shift.date).reduce((a, s) => a + shiftHours(s), 0) + hours;
+    const total = mine.filter(s => s.date === shift.date).reduce((a, s) => a + workHours(ctx, s), 0) + hours;
     if (total > limit) {
       out.push({ code: 'MAX_HOURS_DAY', severity: severityOf(r), ruleName: r.name,
         message: `Would work ${fmt(total)}h that day (limit ${fmt(limit)}h).` });
@@ -247,9 +325,12 @@ export function checkAssignment(shift: EngineShift, emp: EngineEmployee, ctx: En
     }
   }
 
+  // Rest is measured between working days; back-to-back tasks and split
+  // shifts on the same day are one stretch of work.
   for (const r of byType('MIN_REST_BETWEEN')) {
     const minRest = ruleValue(r) * 60;
     for (const other of mine) {
+      if (other.date === shift.date) continue;
       const [os, oe] = interval(other);
       const gap = os >= end ? os - end : start >= oe ? start - oe : -1;
       if (gap >= 0 && gap < minRest) {
@@ -332,63 +413,130 @@ export interface AutoFillResult {
   assignedCount: number;
 }
 
-// Greedy fill: earliest shifts first; for each open slot pick the eligible
-// employee with no blocking conflicts, the fewest warnings, and the fewest
-// hours that week (plus fewer weekend shifts when BALANCE_WEEKENDS is on).
+// Greedy fill, earliest shifts first. For each open slot pick the eligible
+// employee with no blocking conflicts, scoring (lower wins):
+//   warnings, hours that week and that day, weekend load (BALANCE_WEEKENDS),
+//   overlapping restricted slots they'd be needed for, minus a bonus for the
+//   slot's "usually worked by" people and for picking up right where their
+//   previous task ends (so pre-set days become continuous blocks instead of
+//   scattered hours).
+// Break slots go only to someone working right before or after the break.
 export function autoFill(targets: EngineShift[], employees: EngineEmployee[], ctx: EngineContext): AutoFillResult {
-  const work: EngineContext = {
+  const work: IndexedContext = {
     ...ctx,
     shifts: ctx.shifts.map(s => ({ ...s, assignedEmployeeIds: [...s.assignedEmployeeIds], assignedEmployeeNames: [...(s.assignedEmployeeNames ?? [])] })),
+    byEmployee: new Map(),
   };
   const byId = new Map(work.shifts.map(s => [s.id, s]));
+  const index = (s: EngineShift, empId: string) => {
+    const list = work.byEmployee!.get(empId);
+    if (list) list.push(s); else work.byEmployee!.set(empId, [s]);
+  };
+
   const balanceWeekends = ctx.rules.some(r => r.ruleType === 'BALANCE_WEEKENDS' && r.isEnabled);
   const active = employees.filter(e => e.isActive !== false);
   const result: AutoFillResult = { changes: [], unfilled: [], assignedCount: 0 };
 
+  // Who could ever do each slot (task eligibility only). Slots few people can
+  // do go first among those starting together, and while they're open their
+  // people are kept free for them where someone else can cover.
+  const eligible = new Map(targets.map(t => [t.id, active.filter(e => canDoTask(taskOf(ctx, t), e)).length]));
+  const isBreak = (s: EngineShift) => isBreakShift(ctx, s);
+  // A break goes ahead of work starting at the same moment, so whoever just
+  // finished a block takes it before being chained into the next one.
   const ordered = targets
-    .map(t => byId.get(t.id) ?? { ...t, assignedEmployeeIds: [...t.assignedEmployeeIds] })
-    .sort((a, b) => interval(a)[0] - interval(b)[0]);
+    .map(t => byId.get(t.id) ?? { ...t, assignedEmployeeIds: [...t.assignedEmployeeIds], assignedEmployeeNames: [...(t.assignedEmployeeNames ?? [])] })
+    .sort((a, b) => interval(a)[0] - interval(b)[0] || Number(isBreak(b)) - Number(isBreak(a))
+      || eligible.get(a.id)! - eligible.get(b.id)! || a.id.localeCompare(b.id));
+  for (const s of ordered) if (!byId.has(s.id)) { work.shifts.push(s); byId.set(s.id, s); }
+  for (const s of work.shifts) for (const id of s.assignedEmployeeIds) index(s, id);
+  const changed = new Map<string, string[]>();
+
+  const restricted = ordered.filter(s => !isBreak(s) && eligible.get(s.id)! < active.length);
+  const overlapping = (s: EngineShift) => {
+    const [a, b] = interval(s);
+    return restricted.filter(o => o !== s && o.date === s.date && interval(o)[0] < b && a < interval(o)[1]);
+  };
+  const scarcity = (shift: EngineShift, emp: EngineEmployee) => overlapping(shift)
+    .filter(o => o.assignedEmployeeIds.length < staffTarget(o, ctx.rules) && canDoTask(taskOf(ctx, o), emp))
+    .reduce((sum, o) => sum + 400 / Math.max(1, eligible.get(o.id)!), 0);
+
+  const score = (shift: EngineShift, emp: EngineEmployee, conflicts: Conflict[]): number | null => {
+    const [start, end] = interval(shift);
+    const sameDay = employeeShifts(work, emp.id).filter(s => s.date === shift.date);
+    const worked = sameDay.filter(s => !isBreak(s));
+    const before = worked.some(s => interval(s)[1] === start);
+    const after = worked.some(s => interval(s)[0] === end);
+    const dayHours = sameDay.reduce((a, s) => a + workHours(work, s), 0);
+
+    if (isBreak(shift)) {
+      if (!before && !after) return null;
+      const breaksToday = sameDay.filter(isBreak).length;
+      // Someone working through the break, with the longest day and no break
+      // yet, gets it first.
+      return conflicts.length * 1000 + breaksToday * 300 - (before && after ? 200 : 0) - dayHours * 10;
+    }
+    // Picking up within half an hour (e.g. after a break slot) still counts.
+    const adjacent = before || after || worked.some(s => {
+      const [a, b] = interval(s);
+      return (start - b >= 0 && start - b <= 30) || (a - end >= 0 && a - end <= 30);
+    });
+    const weekendLoad = balanceWeekends
+      ? employeeShifts(work, emp.id).filter(s => [0, 6].includes(dayOfWeek(s.date))).length
+      : 0;
+    const preferred = shift.preferredEmployeeIds?.includes(emp.id) ? 500 : 0;
+    const flow = adjacent ? 150 : sameDay.length ? -100 : 0;   // continue a block; avoid split days
+    return conflicts.length * 1000 + weekHours(work, emp.id, shift.date) * 10 + dayHours * 8
+      + weekendLoad * 50 + scarcity(shift, emp) - preferred - flow;
+  };
+
+  {
+    for (const shift of ordered) {
+      const target = staffTarget(shift, ctx.rules);
+      let lastReasons: Conflict[] = [];
+
+      while (shift.assignedEmployeeIds.length < target) {
+        let best: { emp: EngineEmployee; score: number } | null = null;
+        const blockers: Conflict[] = [];
+        let offShift = false;   // someone could have taken this break but isn't working next to it
+        for (const emp of active) {
+          const conflicts = checkAssignment(shift, emp, work);
+          if (worstSeverity(conflicts) === 'block') { blockers.push(...conflicts.filter(c => c.severity === 'block')); continue; }
+          const value = score(shift, emp, conflicts.filter(c => c.code !== 'BREAK_NOT_ON_SHIFT'));
+          if (value === null) { offShift = true; continue; }
+          if (!best || value < best.score) best = { emp, score: value };
+        }
+        if (!best) {
+          lastReasons = offShift ? [{ code: 'BREAK_NOT_ON_SHIFT', severity: 'warn', message: '' }] : blockers;
+          break;
+        }
+        shift.assignedEmployeeIds.push(best.emp.id);
+        shift.assignedEmployeeNames = [...(shift.assignedEmployeeNames ?? []), `${best.emp.firstName} ${best.emp.lastName}`.trim()];
+        index(shift, best.emp.id);
+        changed.set(shift.id, [...(changed.get(shift.id) ?? []), best.emp.id]);
+        result.assignedCount++;
+      }
+
+      const missing = target - shift.assignedEmployeeIds.length;
+      if (missing > 0) {
+        result.unfilled.push({
+          shiftId: shift.id,
+          label: `${shift.title || 'Shift'} · ${shift.date} ${shift.startTime.slice(0, 5)}`,
+          missing,
+          reason: active.length === 0 ? 'No active employees.' : mostCommon(lastReasons) ?? 'No one is eligible.',
+        });
+      }
+    }
+  }
 
   for (const shift of ordered) {
-    if (!byId.has(shift.id)) { work.shifts.push(shift); byId.set(shift.id, shift); }
-    const target = staffTarget(shift, ctx.rules);
-    const added: string[] = [];
-    let lastReasons: Conflict[] = [];
-
-    while (shift.assignedEmployeeIds.length < target) {
-      let best: { emp: EngineEmployee; score: number } | null = null;
-      const blockers: Conflict[] = [];
-      for (const emp of active) {
-        const conflicts = checkAssignment(shift, emp, work);
-        if (worstSeverity(conflicts) === 'block') { blockers.push(...conflicts.filter(c => c.severity === 'block')); continue; }
-        const weekendLoad = balanceWeekends
-          ? employeeShifts(work, emp.id).filter(s => [0, 6].includes(dayOfWeek(s.date))).length
-          : 0;
-        const score = conflicts.length * 1000 + weekHours(work, emp.id, shift.date) * 10 + weekendLoad * 50;
-        if (!best || score < best.score) best = { emp, score };
-      }
-      if (!best) { lastReasons = blockers; break; }
-      shift.assignedEmployeeIds.push(best.emp.id);
-      shift.assignedEmployeeNames = [...(shift.assignedEmployeeNames ?? []), `${best.emp.firstName} ${best.emp.lastName}`.trim()];
-      added.push(best.emp.id);
-      result.assignedCount++;
-    }
-
-    if (added.length) {
+    const added = changed.get(shift.id);
+    if (added) {
       result.changes.push({
         shiftId: shift.id,
         employeeIds: shift.assignedEmployeeIds,
         employeeNames: shift.assignedEmployeeNames ?? [],
         added,
-      });
-    }
-    const missing = target - shift.assignedEmployeeIds.length;
-    if (missing > 0) {
-      result.unfilled.push({
-        shiftId: shift.id,
-        label: `${shift.title || 'Shift'} · ${shift.date} ${shift.startTime.slice(0, 5)}`,
-        missing,
-        reason: active.length === 0 ? 'No active employees.' : mostCommon(lastReasons) ?? 'No one is eligible.',
       });
     }
   }
@@ -411,6 +559,8 @@ function mostCommon(conflicts: Conflict[]): string | null {
     OVERTIME: 'Everyone else would go into overtime.',
     SHIFT_FULL: 'Shift reached its maximum staff.',
     MAX_STAFFING: 'Shift reached its maximum staff.',
+    TASK_ELIGIBILITY: 'No one else is allowed to do this task.',
+    BREAK_NOT_ON_SHIFT: 'No one is working right before or after this break.',
   };
   return labels[code] ?? conflicts.find(c => c.code === code)!.message;
 }
